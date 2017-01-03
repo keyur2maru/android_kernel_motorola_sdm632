@@ -99,6 +99,13 @@ config DRM_MSM_DSI_28NM_8960_PHY
 	  Choose this option if the 28nm DSI PHY 8960 variant is used on the
 	  platform.
 
+config DRM_MSM_DSI_14NM_PHY
+	bool "Enable DSI 14nm PHY driver in MSM DRM (used by MSM8996/APQ8096)"
+	depends on DRM_MSM_DSI
+	default y
+	help
+	  Choose this option if DSI PHY on 8996 is used on the platform.
+
 config DRM_MSM_MDP5
 	tristate "MSM MDP5 DRM driver"
 	depends on DRM_MSM
@@ -148,4 +155,3 @@ config DRM_SDE_RSC
           can vote their active state. Any active request from any client
           avoids the display core power collapse. A client can also register
           for display core power collapse events on rsc.
-
