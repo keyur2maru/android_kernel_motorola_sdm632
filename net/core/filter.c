@@ -3167,17 +3167,6 @@ static bool bpf_skb_is_valid_access(int off, int size, enum bpf_access_type type
 	case bpf_ctx_range_till(struct __sk_buff, cb[0], cb[4]):
 		if (off + size > offsetofend(struct __sk_buff, cb[4]))
 			return false;
-		if (size == sizeof(__u32) &&
-		    off > offsetof(struct __sk_buff, cb[4]))
-			return false;
-		if (size == sizeof(__u64) &&
-		    off > offsetof(struct __sk_buff, cb[2]))
-			return false;
-		if (size != sizeof(__u8)  &&
-		    size != sizeof(__u16) &&
-		    size != sizeof(__u32) &&
-		    size != sizeof(__u64))
-			return false;
 		break;
 	case bpf_ctx_range_till(struct __sk_buff, remote_ip6[0], remote_ip6[3]):
 	case bpf_ctx_range_till(struct __sk_buff, local_ip6[0], local_ip6[3]):
