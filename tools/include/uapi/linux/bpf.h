@@ -431,7 +431,7 @@ enum bpf_func_id {
 	BPF_FUNC_current_task_under_cgroup,
 
 	/**
-	 * u64 bpf_bpf_get_socket_cookie(skb)
+	 * u64 bpf_get_socket_cookie(skb)
 	 *     Get the cookie for the socket stored inside sk_buff.
 	 *     @skb: pointer to skb
 	 *     Return: 8 Bytes non-decreasing number on success or 0 if the socket
