@@ -604,6 +604,7 @@ void tcp_check_space(struct sock *sk);
 void tcp_init_xmit_timers(struct sock *);
 static inline void tcp_clear_xmit_timers(struct sock *sk)
 {
+	hrtimer_cancel(&tcp_sk(sk)->pacing_timer);
 	inet_csk_clear_xmit_timers(sk);
 }
 
@@ -2129,5 +2130,7 @@ int tcp_set_ulp(struct sock *sk, const char *name);
 int tcp_set_ulp_id(struct sock *sk, const int ulp);
 void tcp_get_available_ulp(char *buf, size_t len);
 void tcp_cleanup_ulp(struct sock *sk);
+
+enum hrtimer_restart tcp_pace_kick(struct hrtimer *timer);
 
 #endif	/* _TCP_H */
