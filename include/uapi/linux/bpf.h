@@ -591,6 +591,11 @@ union bpf_attr {
  *     Return:
  *       > 0 length of the string including the trailing NUL on success
  *       < 0 error
+ *
+ * u32 bpf_set_hash(skb, hash)
+ *     Set full skb->hash.
+ *     @skb: pointer to skb
+ *     @hash: hash to set
  */
 #define __BPF_FUNC_MAPPER(FN)		\
 	FN(unspec),			\
@@ -714,7 +719,8 @@ union bpf_attr {
 	FN(get_current_ancestor_cgroup_id),	\
 	FN(sk_assign),			\
 	FN(ktime_get_boot_ns),          \
-	FN(probe_read_str),
+ 	FN(probe_read_str),		\
+	FN(set_hash),
 
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
