@@ -2422,11 +2422,12 @@ int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
 {
 	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
 	struct net_device *fwd;
+	u32 index = ri->ifindex;
 
-	fwd = dev_get_by_index_rcu(dev_net(dev), ri->ifindex);
+	fwd = dev_get_by_index_rcu(dev_net(dev), index);
 	ri->ifindex = 0;
 	if (unlikely(!fwd)) {
-		bpf_warn_invalid_xdp_redirect(ri->ifindex);
+		bpf_warn_invalid_xdp_redirect(index);
 		return -EINVAL;
 	}
 
