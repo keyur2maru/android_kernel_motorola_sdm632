@@ -3332,6 +3332,8 @@ static const struct bpf_func_proto *sk_skb_func_proto(enum bpf_func_id func_id)
 		return &bpf_get_socket_cookie_proto;
 	case BPF_FUNC_get_socket_uid:
 		return &bpf_get_socket_uid_proto;
+	case BPF_FUNC_sk_redirect_map:
+		return &bpf_sk_redirect_map_proto;
 	default:
 		return bpf_base_func_proto(func_id);
 	}
@@ -3343,6 +3345,8 @@ static const struct bpf_func_proto *
 	switch (func_id) {
 	case BPF_FUNC_setsockopt:
 		return &bpf_setsockopt_proto;
+	case BPF_FUNC_sock_map_update:
+		return &bpf_sock_map_update_proto;
 	default:
 		return bpf_base_func_proto(func_id);
 	}
