@@ -2599,9 +2599,14 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb)
 {
 	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
 	unsigned int len;
+	u32 index = ri->ifindex;
 
-	dev = dev_get_by_index_rcu(dev_net(dev), ri->ifindex);
+	dev = dev_get_by_index_rcu(dev_net(dev), index);
 	ri->ifindex = 0;
+
+	if (unlikely(!dev)) {
+		goto err;
+	}
 
 	if (unlikely(!(dev->flags & IFF_UP)))
 		goto err;
