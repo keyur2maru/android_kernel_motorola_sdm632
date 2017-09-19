@@ -2517,6 +2517,7 @@ static int __bpf_tx_xdp(struct net_device *dev,
 	return 0;
 }
 
+
 static inline bool xdp_map_invalid(const struct bpf_prog *xdp_prog,
 				   unsigned long aux)
 {
@@ -2537,7 +2538,7 @@ static int xdp_do_redirect_map(struct net_device *dev, struct xdp_buff *xdp,
 	ri->map = NULL;
 	ri->map_owner = 0;
 
-	if (unlikely(map_owner != xdp_prog)) {
+	if (unlikely(xdp_map_invalid(xdp_prog, map_owner))) {
 		err = -EFAULT;
 		map = NULL;
 		goto err;
@@ -2605,7 +2606,7 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
 			    struct bpf_prog *xdp_prog)
 {
 	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
-	const struct bpf_prog *map_owner = ri->map_owner;
+	unsigned long map_owner = ri->map_owner;
 	struct bpf_map *map = ri->map;
 	struct net_device *fwd = NULL;
 	u32 index = ri->ifindex;
@@ -2614,10 +2615,10 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
 
 	ri->ifindex = 0;
 	ri->map = NULL;
-	ri->map_owner = NULL;
+	ri->map_owner = 0;
 
 	if (map) {
-		if (unlikely(map_owner != xdp_prog)) {
+		if (unlikely(xdp_map_invalid(xdp_prog, map_owner))) {
 			err = -EFAULT;
 			map = NULL;
 			goto err;
