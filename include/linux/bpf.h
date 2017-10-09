@@ -461,6 +461,11 @@ static inline bool unprivileged_ebpf_enabled(void)
 	return false;
 }
 
+static inline int bpf_obj_get_user(const char __user *pathname)
+{
+	return -EOPNOTSUPP;
+}
+
 static inline struct net_device  *__dev_map_lookup_elem(struct bpf_map *map,
 						       u32 key)
 {
