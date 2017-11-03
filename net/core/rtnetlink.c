@@ -1266,11 +1266,11 @@ static int rtnl_xdp_fill(struct sk_buff *skb, struct net_device *dev)
 	if (rcu_access_pointer(dev->xdp_prog)) {
 		xdp_flags = XDP_FLAGS_SKB_MODE;
 		val = 1;
-	} else if (dev->netdev_ops->ndo_xdp) {
-		struct netdev_xdp xdp_op = {};
+	} else if (dev->netdev_ops->ndo_bpf) {
+		struct netdev_bpf xdp_op = {};
 
 		xdp_op.command = XDP_QUERY_PROG;
-		err = dev->netdev_ops->ndo_xdp(dev, &xdp_op);
+		err = dev->netdev_ops->ndo_bpf(dev, &xdp_op);
 		if (err)
 			goto err_cancel;
 		val = xdp_op.prog_attached;

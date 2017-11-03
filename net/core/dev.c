@@ -4559,7 +4559,7 @@ static int __netif_receive_skb(struct sk_buff *skb)
 	return ret;
 }
 
-static int generic_xdp_install(struct net_device *dev, struct netdev_xdp *xdp)
+static int generic_xdp_install(struct net_device *dev, struct netdev_bpf *xdp)
 {
 	struct bpf_prog *new = xdp->prog;
 	int ret = 0;
@@ -7110,15 +7110,15 @@ EXPORT_SYMBOL(dev_change_proto_down);
  */
 int dev_change_xdp_fd(struct net_device *dev, int fd, u32 flags)
 {
-	int (*xdp_op)(struct net_device *dev, struct netdev_xdp *xdp);
+	int (*xdp_op)(struct net_device *dev, struct netdev_bpf *xdp);
 	const struct net_device_ops *ops = dev->netdev_ops;
 	struct bpf_prog *prog = NULL;
-	struct netdev_xdp xdp;
+	struct netdev_bpf xdp;
 	int err;
 
 	ASSERT_RTNL();
 
-	xdp_op = ops->ndo_xdp;
+	xdp_op = ops->ndo_bpf;
 	if (!xdp_op && (flags & XDP_FLAGS_DRV_MODE))
 		return -EOPNOTSUPP;
 	if (!xdp_op || (flags & XDP_FLAGS_SKB_MODE))
