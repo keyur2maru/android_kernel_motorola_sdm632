@@ -38,6 +38,7 @@
 #include <linux/slab.h>
 #include <linux/bitops.h>
 
+#include <linux/iversion.h>
 #include "ext4_jbd2.h"
 #include "xattr.h"
 #include "acl.h"
