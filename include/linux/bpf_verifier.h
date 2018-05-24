@@ -154,10 +154,10 @@ struct bpf_verifier_state_list {
 
 struct bpf_insn_aux_data {
 	union {
-		enum bpf_reg_type ptr_type;     /* pointer type for load/store insns */
-		struct bpf_map *map_ptr;        /* pointer for call insn into lookup_elem */
-		u32 alu_limit;			/* limit for add/sub register with pointer */
+		enum bpf_reg_type ptr_type;	/* pointer type for load/store insns */
+		unsigned long map_state;	/* pointer/poison value for maps */
 		s32 call_imm;			/* saved imm field of call insn */
+		u32 alu_limit;			/* limit for add/sub register with pointer */
 	};
 	int ctx_field_size; /* the ctx field size for load insn, maybe 0 */
 	int converted_op_size; /* the valid value width after perceived conversion */
