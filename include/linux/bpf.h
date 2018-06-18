@@ -579,6 +579,8 @@ static inline void __dev_map_flush(struct bpf_map *map)
 struct sock  *__sock_map_lookup_elem(struct bpf_map *map, u32 key);
 struct sock  *__sock_hash_lookup_elem(struct bpf_map *map, void *key);
 int sock_map_prog(struct bpf_map *map, struct bpf_prog *prog, u32 type);
+int sockmap_get_from_fd(const union bpf_attr *attr, int type,
+			struct bpf_prog *prog);
 #else
 static inline struct sock  *__sock_map_lookup_elem(struct bpf_map *map, u32 key)
 {
@@ -596,6 +598,12 @@ static inline int sock_map_prog(struct bpf_map *map,
 				u32 type)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int sockmap_get_from_fd(const union bpf_attr *attr, int type,
+				      struct bpf_prog *prog)
+{
+	return -EINVAL;
 }
 #endif
 
