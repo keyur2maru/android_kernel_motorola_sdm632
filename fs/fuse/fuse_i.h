@@ -631,6 +631,9 @@ struct fuse_conn {
 	/** passthrough IO. */
 	unsigned passthrough:1;
 
+	/** cache READLINK responses in page cache */
+	unsigned cache_symlinks:1;
+
 	/*
 	 * The following bitfields are only for optimization purposes
 	 * and hence races in setting them will not cause malfunction
