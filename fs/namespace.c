@@ -1015,11 +1015,8 @@ struct vfsmount *vfs_kern_mount(struct file_system_type *type,
 	}
 	fc->mnt = &mnt->mnt;
 
-	if (name) {
-		fc->source = kstrdup(name, GFP_KERNEL);
-		if (!fc->source)
-			ret = -ENOMEM;
-	}
+	if (name)
+		ret = vfs_parse_fs_string(fc, "source", name, strlen(name));
 	if (!ret)
 		ret = parse_monolithic_mount_data(fc, data);
 	if (!ret)

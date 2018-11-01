@@ -58,6 +58,7 @@ struct iov_iter;
 struct fscrypt_info;
 struct fscrypt_operations;
 struct fs_context;
+struct fs_parameter_description;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -1355,8 +1356,33 @@ struct mm_struct;
 #define SB_I_DYNBDI	0x00000100
 
 /*
- * These sb flags are internal to the kernel.
- *
+ * sb->s_flags.  These mirror the equivalent MS_* flags.  4.9 predates the
+ * MS_* -> SB_* rename, and the tree still spells them MS_*; define the SB_*
+ * names so the mount API can use them without a treewide conversion.
+ */
+#define SB_RDONLY	MS_RDONLY
+#define SB_NOSUID	MS_NOSUID
+#define SB_NODEV	MS_NODEV
+#define SB_NOEXEC	MS_NOEXEC
+#define SB_SYNCHRONOUS	MS_SYNCHRONOUS
+#define SB_MANDLOCK	MS_MANDLOCK
+#define SB_DIRSYNC	MS_DIRSYNC
+#define SB_NOATIME	MS_NOATIME
+#define SB_NODIRATIME	MS_NODIRATIME
+#define SB_SILENT	MS_SILENT
+#define SB_POSIXACL	MS_POSIXACL
+#define SB_KERNMOUNT	MS_KERNMOUNT
+#define SB_I_VERSION	MS_I_VERSION
+#define SB_LAZYTIME	MS_LAZYTIME
+
+/* These sb flags are internal to the kernel */
+#define SB_SUBMOUNT	MS_SUBMOUNT
+#define SB_NOSEC	MS_NOSEC
+#define SB_BORN		MS_BORN
+#define SB_ACTIVE	MS_ACTIVE
+#define SB_NOUSER	MS_NOUSER
+
+/*
  * Upstream puts SB_FORCE at (1<<27).  On 4.9 that bit is MS_NOREMOTELOCK,
  * which fs/locks.c and overlayfs still use, so take a free low bit instead.
  * SB_FORCE only ever lives in fs_context::sb_flags - reconfigure_super()
@@ -1364,8 +1390,6 @@ struct mm_struct;
  * sb->s_flags.
  */
 #define SB_FORCE	(1<<9)
-
-#define SB_RDONLY	MS_RDONLY
 
 /* Possible states of 'frozen' field */
 enum {
@@ -2111,6 +2135,7 @@ struct file_system_type {
 #define FS_USERNS_MOUNT		8	/* Can be mounted by userns root */
 #define FS_RENAME_DOES_D_MOVE	32768	/* FS will handle d_move() during rename() internally. */
 	int (*init_fs_context)(struct fs_context *);
+	const struct fs_parameter_description *parameters;
 	struct dentry *(*mount) (struct file_system_type *, int,
 		       const char *, void *);
 	struct dentry *(*mount2) (struct vfsmount *, struct file_system_type *, int,
