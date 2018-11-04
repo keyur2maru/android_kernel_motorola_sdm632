@@ -1579,6 +1579,29 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 
 static void shrink_submounts(struct mount *mnt);
 
+static int do_umount_root(struct super_block *sb)
+{
+	int ret = 0;
+
+	down_write(&sb->s_umount);
+	if (!sb_rdonly(sb)) {
+		struct fs_context *fc;
+
+		fc = fs_context_for_reconfigure(sb->s_root, SB_RDONLY,
+						SB_RDONLY);
+		if (IS_ERR(fc)) {
+			ret = PTR_ERR(fc);
+		} else {
+			ret = parse_monolithic_mount_data(fc, NULL);
+			if (!ret)
+				ret = reconfigure_super(fc);
+			put_fs_context(fc);
+		}
+	}
+	up_write(&sb->s_umount);
+	return ret;
+}
+
 static int do_umount(struct mount *mnt, int flags)
 {
 	struct super_block *sb = mnt->mnt.mnt_sb;
@@ -1644,11 +1667,7 @@ static int do_umount(struct mount *mnt, int flags)
 		 */
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
-		down_write(&sb->s_umount);
-		if (!(sb->s_flags & MS_RDONLY))
-			retval = do_remount_sb(sb, MS_RDONLY, NULL, 0);
-		up_write(&sb->s_umount);
-		return retval;
+		return do_umount_root(sb);
 	}
 
 	namespace_lock();
@@ -2400,6 +2419,7 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 	int err;
 	struct super_block *sb = path->mnt->mnt_sb;
 	struct mount *mnt = real_mount(path->mnt);
+	struct fs_context *fc = NULL;
 
 	if (!check_mnt(mnt))
 		return -EINVAL;
@@ -2434,17 +2454,38 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 		return -EPERM;
 	}
 
+	/*
+	 * 4.9's security_sb_remount() takes the raw monolithic option string
+	 * and extracts the LSM options itself.  Upstream hands it the already
+	 * parsed opts from fs_context, which only exists after the v5.1 LSM
+	 * mount-option rework.  Keep the call here, on the untouched @data,
+	 * so SELinux sees exactly what it saw before.
+	 */
 	err = security_sb_remount(sb, data);
 	if (err)
 		return err;
 
+	if (!(flags & MS_BIND)) {
+		fc = fs_context_for_reconfigure(path->dentry, flags,
+						MS_RMT_MASK);
+		if (IS_ERR(fc))
+			return PTR_ERR(fc);
+		fc->mnt = path->mnt;
+
+		err = parse_monolithic_mount_data(fc, data);
+		if (err) {
+			put_fs_context(fc);
+			return err;
+		}
+	}
+
 	down_write(&sb->s_umount);
-	if (flags & MS_BIND)
+	if (flags & MS_BIND) {
 		err = change_mount_flags(path->mnt, flags);
-	else if (!capable(CAP_SYS_ADMIN))
+	} else if (!capable(CAP_SYS_ADMIN)) {
 		err = -EPERM;
-	else {
-		err = do_remount_sb2(path->mnt, sb, flags, data, 0);
+	} else {
+		err = reconfigure_super(fc);
 		namespace_lock();
 		lock_mount_hash();
 		propagate_remount(mnt);
@@ -2459,6 +2500,9 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 		unlock_mount_hash();
 	}
 	up_write(&sb->s_umount);
+
+	if (fc)
+		put_fs_context(fc);
 	return err;
 }
 
