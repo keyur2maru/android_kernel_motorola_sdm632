@@ -1353,6 +1353,19 @@ struct mm_struct;
 /* Temporary flag until all filesystems are converted to dynamic bdis */
 #define SB_I_DYNBDI	0x00000100
 
+/*
+ * These sb flags are internal to the kernel.
+ *
+ * Upstream puts SB_FORCE at (1<<27).  On 4.9 that bit is MS_NOREMOTELOCK,
+ * which fs/locks.c and overlayfs still use, so take a free low bit instead.
+ * SB_FORCE only ever lives in fs_context::sb_flags - reconfigure_super()
+ * rejects an sb_flags_mask outside MS_RMT_MASK, so it never reaches
+ * sb->s_flags.
+ */
+#define SB_FORCE	(1<<9)
+
+#define SB_RDONLY	MS_RDONLY
+
 /* Possible states of 'frozen' field */
 enum {
 	SB_UNFROZEN = 0,		/* FS is unfrozen */
@@ -1485,6 +1498,11 @@ struct super_block {
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
 };
+
+static inline bool sb_rdonly(const struct super_block *sb)
+{
+	return sb->s_flags & MS_RDONLY;
+}
 
 /* Helper functions so that in most cases filesystems will
  * not need to deal directly with kuid_t and kgid_t and can
