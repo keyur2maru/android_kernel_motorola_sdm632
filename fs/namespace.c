@@ -18,6 +18,7 @@
 #include <linux/idr.h>
 #include <linux/init.h>		/* init_rootfs */
 #include <linux/fs_struct.h>	/* get_fs_root et.al. */
+#include <linux/fs_context.h>
 #include <linux/fsnotify.h>	/* fsnotify_vfsmount_delete */
 #include <linux/uaccess.h>
 #include <linux/file.h>
@@ -974,15 +975,23 @@ static struct mount *skip_mnt_tree(struct mount *p)
 	return p;
 }
 
-struct vfsmount *
-vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void *data)
+struct vfsmount *vfs_kern_mount(struct file_system_type *type,
+				int flags, const char *name,
+				void *data)
 {
+	struct fs_context *fc;
 	struct mount *mnt;
-	struct dentry *root;
+	int ret = 0;
 
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
+	/*
+	 * The mount has to exist before ->mount2() is called: sdcardfs takes
+	 * the vfsmount (and its ->mnt.data) as an argument.  Allocate it up
+	 * front and hand it to the context, rather than after vfs_get_tree()
+	 * as upstream does.
+	 */
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
@@ -998,20 +1007,40 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (flags & MS_KERNMOUNT)
 		mnt->mnt.mnt_flags = MNT_INTERNAL;
 
-	root = mount_fs(type, flags, name, &mnt->mnt, data);
-	if (IS_ERR(root)) {
+	fc = fs_context_for_mount(type, flags);
+	if (IS_ERR(fc)) {
 		mnt_free_id(mnt);
 		free_vfsmnt(mnt);
-		return ERR_CAST(root);
+		return ERR_CAST(fc);
 	}
+	fc->mnt = &mnt->mnt;
 
-	mnt->mnt.mnt_root = root;
-	mnt->mnt.mnt_sb = root->d_sb;
+	if (name) {
+		fc->source = kstrdup(name, GFP_KERNEL);
+		if (!fc->source)
+			ret = -ENOMEM;
+	}
+	if (!ret)
+		ret = parse_monolithic_mount_data(fc, data);
+	if (!ret)
+		ret = vfs_get_tree(fc);
+	if (ret) {
+		put_fs_context(fc);
+		mnt_free_id(mnt);
+		free_vfsmnt(mnt);
+		return ERR_PTR(ret);
+	}
+	up_write(&fc->root->d_sb->s_umount);
+
+	atomic_inc(&fc->root->d_sb->s_active);
+	mnt->mnt.mnt_root = dget(fc->root);
+	mnt->mnt.mnt_sb = fc->root->d_sb;
 	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
 	mnt->mnt_parent = mnt;
 	lock_mount_hash();
-	list_add_tail(&mnt->mnt_instance, &root->d_sb->s_mounts);
+	list_add_tail(&mnt->mnt_instance, &fc->root->d_sb->s_mounts);
 	unlock_mount_hash();
+	put_fs_context(fc);
 	return &mnt->mnt;
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
