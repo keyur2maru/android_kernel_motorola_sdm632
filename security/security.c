@@ -268,6 +268,11 @@ int security_bprm_secureexec(struct linux_binprm *bprm)
 	return call_int_hook(bprm_secureexec, 0, bprm);
 }
 
+int security_fs_context_dup(struct fs_context *fc, struct fs_context *src_fc)
+{
+	return call_int_hook(fs_context_dup, 0, fc, src_fc);
+}
+
 int security_fs_context_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
 	return call_int_hook(fs_context_parse_param, -ENOPARAM, fc, param);
