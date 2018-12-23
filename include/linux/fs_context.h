@@ -26,6 +26,7 @@ struct vfsmount;
 
 enum fs_context_purpose {
 	FS_CONTEXT_FOR_MOUNT,		/* New superblock for explicit mount */
+	FS_CONTEXT_FOR_SUBMOUNT,	/* New superblock for automatic submount */
 	FS_CONTEXT_FOR_RECONFIGURE,	/* Superblock reconfiguration (remount) */
 };
 
@@ -63,6 +64,8 @@ extern struct fs_context *fs_context_for_mount(struct file_system_type *fs_type,
 extern struct fs_context *fs_context_for_reconfigure(struct dentry *dentry,
 						unsigned int sb_flags,
 						unsigned int sb_flags_mask);
+extern struct fs_context *fs_context_for_submount(struct file_system_type *fs_type,
+						struct dentry *reference);
 
 extern int vfs_get_tree(struct fs_context *fc);
 extern void put_fs_context(struct fs_context *fc);
