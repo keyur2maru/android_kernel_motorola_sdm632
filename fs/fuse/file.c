@@ -105,7 +105,7 @@ static void fuse_file_put(struct fuse_file *ff, bool sync, bool isdir)
 	if (refcount_dec_and_test(&ff->count)) {
 		struct fuse_req *req = ff->reserved_req;
 
-		if (ff->fc->no_open && !isdir) {
+		if (isdir ? ff->fc->no_opendir : ff->fc->no_open) {
 			/*
 			 * Drop the release request when client does not
 			 * implement 'open'
@@ -141,7 +141,7 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 
 	ff->fh = 0;
 	ff->open_flags = FOPEN_KEEP_CACHE; /* Default for no-open */
-	if (!fc->no_open || isdir) {
+	if (isdir ? !fc->no_opendir : !fc->no_open) {
 		struct fuse_open_out outarg;
 		int err;
 
@@ -151,11 +151,14 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 			ff->fh = outarg.fh;
 			ff->open_flags = outarg.open_flags;
 			ff->passthrough_filp = passthrough_filp;
-		} else if (err != -ENOSYS || isdir) {
+		} else if (err != -ENOSYS) {
 			fuse_file_free(ff);
 			return err;
 		} else {
-			fc->no_open = 1;
+			if (isdir)
+				fc->no_opendir = 1;
+			else
+				fc->no_open = 1;
 		}
 	}
 
