@@ -89,6 +89,7 @@ struct fs_context {
 	unsigned int		sb_flags;	/* Proposed superblock flags (MS_*) */
 	unsigned int		sb_flags_mask;	/* Superblock flags that were changed */
 	unsigned int		lsm_flags;	/* Information flags from the fs to the LSM */
+	unsigned int		s_iflags;	/* OR'd with sb->s_iflags */
 	enum fs_context_purpose	purpose:8;
 	bool			need_free:1;	/* Need to call ops->free() */
 	bool			global:1;	/* Goes into &init_user_ns */
