@@ -88,7 +88,6 @@ struct fs_context {
 	const struct cred	*cred;		/* The mounter's credentials */
 	struct p_log		log;		/* Logging buffer */
 	const char		*source;	/* The source name (eg. dev path) */
-	const char		*subtype;	/* The subtype to set on the superblock */
 	char			*secdata;	/* Linux S&M options */
 	struct vfsmount		*mnt;		/* The mount being created (->mount2()) */
 	void			*s_fs_info;	/* Proposed s_fs_info */
