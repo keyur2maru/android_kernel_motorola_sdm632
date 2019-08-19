@@ -1991,6 +1991,7 @@ static ssize_t fuse_dev_splice_write(struct pipe_inode_info *pipe,
 {
 	unsigned nbuf;
 	unsigned idx;
+	unsigned count;
 	struct pipe_buffer *bufs;
 	struct fuse_copy_state cs;
 	struct fuse_dev *fud;
@@ -2003,7 +2004,8 @@ static ssize_t fuse_dev_splice_write(struct pipe_inode_info *pipe,
 
 	pipe_lock(pipe);
 
-	bufs = kvmalloc_array(pipe->nrbufs, sizeof(struct pipe_buffer),
+	count = pipe->nrbufs;
+	bufs = kvmalloc_array(count, sizeof(struct pipe_buffer),
 			      GFP_KERNEL);
 	if (!bufs) {
 		pipe_unlock(pipe);
@@ -2024,8 +2026,9 @@ static ssize_t fuse_dev_splice_write(struct pipe_inode_info *pipe,
 		struct pipe_buffer *ibuf;
 		struct pipe_buffer *obuf;
 
-		BUG_ON(nbuf >= pipe->buffers);
-		BUG_ON(!pipe->nrbufs);
+		if (WARN_ON(nbuf >= count || !pipe->nrbufs))
+			goto out_free;
+
 		ibuf = &pipe->bufs[pipe->curbuf];
 		obuf = &bufs[nbuf];
 
