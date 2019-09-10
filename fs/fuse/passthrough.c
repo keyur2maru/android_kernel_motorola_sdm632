@@ -35,12 +35,12 @@ void fuse_setup_passthrough(struct fuse_conn *fc, struct fuse_req *req)
 	    (req->in.h.opcode != FUSE_CREATE))
 		return;
 
-	open_out_index = req->in.numargs - 1;
+	open_out_index = req->args->in_numargs - 1;
 
 	WARN_ON(open_out_index != 0 && open_out_index != 1);
-	WARN_ON(req->out.args[open_out_index].size != sizeof(*open_out));
+	WARN_ON(req->args->out_args[open_out_index].size != sizeof(*open_out));
 
-	open_out = req->out.args[open_out_index].value;
+	open_out = req->args->out_args[open_out_index].value;
 
 	daemon_fd = (int)open_out->passthrough_fd;
 	if (daemon_fd < 0)
