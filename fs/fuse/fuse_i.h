@@ -230,55 +230,10 @@ struct fuse_in_arg {
 	const void *value;
 };
 
-/** The request input */
-struct fuse_in {
-	/** The request header */
-	struct fuse_in_header h;
-
-	/** True if the data for the last argument is in req->pages */
-	unsigned argpages:1;
-
-	/** Number of arguments */
-	unsigned numargs;
-
-	/** Array of arguments */
-	struct fuse_in_arg args[3];
-};
-
 /** One output argument of a request */
 struct fuse_arg {
 	unsigned size;
 	void *value;
-};
-
-/** The request output */
-struct fuse_out {
-	/** Header returned from userspace */
-	struct fuse_out_header h;
-
-	/*
-	 * The following bitfields are not changed during the request
-	 * processing
-	 */
-
-	/** Last argument is variable length (can be shorter than
-	    arg->size) */
-	unsigned argvar:1;
-
-	/** Last argument is a list of pages to copy data to */
-	unsigned argpages:1;
-
-	/** Zero partially or not copied pages */
-	unsigned page_zeroing:1;
-
-	/** Pages may be replaced with new ones */
-	unsigned page_replace:1;
-
-	/** Number or arguments */
-	unsigned numargs;
-
-	/** Array of arguments */
-	struct fuse_arg args[2];
 };
 
 /** FUSE page descriptor */
@@ -390,9 +345,6 @@ struct fuse_req {
 	/* Input/output arguments */
 	struct fuse_args *args;
 
-	/** Pages were mapped from userspace (downstream passthrough) */
-	bool user_pages;
-
 	/** refcount */
 	refcount_t count;
 
@@ -400,11 +352,15 @@ struct fuse_req {
 	/* Request flags, updated with test/set/clear_bit() */
 	unsigned long flags;
 
-	/** The request input */
-	struct fuse_in in;
+	/* The request input header */
+	struct {
+		struct fuse_in_header h;
+	} in;
 
-	/** The request output */
-	struct fuse_out out;
+	/* The request output header */
+	struct {
+		struct fuse_out_header h;
+	} out;
 
 	/** Used to wake up the task waiting for completion of request*/
 	wait_queue_head_t waitq;
@@ -417,12 +373,6 @@ struct fuse_req {
 
 	/** number of pages in vector */
 	unsigned num_pages;
-
-	/** Path used for completing d_canonical_path */
-	struct path *canonical_path;
-
-	/** Request completion callback */
-	void (*end)(struct fuse_conn *, struct fuse_req *);
 
 	/** fuse passthrough file  */
 	struct file *passthrough_filp;
