@@ -366,8 +366,8 @@ struct fs_context *vfs_dup_fs_context(struct fs_context *src_fc)
 	get_net(fc->net_ns);
 	get_user_ns(fc->user_ns);
 	get_cred(fc->cred);
-	if (fc->log)
-		refcount_inc(&fc->log->usage);
+	if (fc->log.log)
+		refcount_inc(&fc->log.log->usage);
 
 	/*
 	 * On 4.9 the LSM mount options live in a secdata page rather than in
@@ -458,12 +458,12 @@ EXPORT_SYMBOL(logfc);
  */
 static void put_fc_log(struct fs_context *fc)
 {
-	struct fc_log *log = fc->log;
+	struct fc_log *log = fc->log.log;
 	int i;
 
 	if (log) {
 		if (refcount_dec_and_test(&log->usage)) {
-			fc->log = NULL;
+			fc->log.log = NULL;
 			for (i = 0; i <= 7; i++)
 				if (log->need_free & (1 << i))
 					kfree(log->buffer[i]);
