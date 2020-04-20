@@ -370,6 +370,9 @@ struct fuse_req {
 
 	/** fuse passthrough file  */
 	struct file *passthrough_filp;
+
+	/** fuse_conn this request belongs to */
+	struct fuse_conn *fc;
 };
 
 struct fuse_iqueue;
