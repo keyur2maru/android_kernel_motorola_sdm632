@@ -77,7 +77,7 @@ static ssize_t fuse_passthrough_read_write_iter(struct kiocb *iocb,
 	ff = iocb->ki_filp->private_data;
 	fuse_file = iocb->ki_filp;
 	passthrough_filp = ff->passthrough_filp;
-	fc = ff->fc;
+	fc = ff->fm->fc;
 
 	/* lock passthrough file to prevent it from being released */
 	get_file(passthrough_filp);
