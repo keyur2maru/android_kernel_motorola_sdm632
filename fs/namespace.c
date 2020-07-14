@@ -2519,6 +2519,7 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 		if (IS_ERR(fc))
 			return PTR_ERR(fc);
 		fc->mnt = path->mnt;
+		fc->oldapi = true;
 
 		err = parse_monolithic_mount_data(fc, data);
 		if (err) {
