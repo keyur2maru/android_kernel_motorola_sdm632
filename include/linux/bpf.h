@@ -314,6 +314,10 @@ enum bpf_reg_type {
 	PTR_TO_BTF_ID,		 /* reg points to kernel struct */
 	PTR_TO_MEM,		 /* reg points to valid memory region */
 	PTR_TO_MEM_OR_NULL,	 /* reg points to valid memory region or NULL */
+	PTR_TO_RDONLY_BUF,	 /* reg points to a readonly buffer */
+	PTR_TO_RDONLY_BUF_OR_NULL, /* reg points to a readonly buffer or NULL */
+	PTR_TO_RDWR_BUF,	 /* reg points to a read/write buffer */
+	PTR_TO_RDWR_BUF_OR_NULL, /* reg points to a read/write buffer or NULL */
 };
 
 /* The information passed from prog-specific *_is_valid_access
@@ -415,6 +419,8 @@ struct bpf_prog_aux {
 	u32 func_cnt; /* used by non-func prog as the number of func progs */
 	u32 func_idx; /* 0 for non-func prog, the index in func array for func prog */
 	u32 attach_btf_id; /* in-kernel BTF type id to attach to */
+	u32 max_rdonly_access;
+	u32 max_rdwr_access;
 	bool verifier_zext; /* Zero extensions has been inserted by verifier. */
 	bool offload_requested;
 	bool attach_btf_trace; /* true if attaching to BTF-enabled raw tp */
