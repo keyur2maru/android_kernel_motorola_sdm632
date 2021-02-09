@@ -2277,10 +2277,12 @@ static const struct bpf_func_proto bpf_skb_change_tail_proto = {
 	.arg3_type	= ARG_ANYTHING,
 };
 
+#define BPF_SKB_MAX_LEN SKB_MAX_ALLOC
+
 BPF_CALL_3(bpf_skb_change_head, struct sk_buff *, skb, u32, head_room,
 	   u64, flags)
 {
-	u32 max_len = __bpf_skb_max_len(skb);
+	u32 max_len = BPF_SKB_MAX_LEN;
 	u32 new_len = skb->len + head_room;
 	int ret;
 
