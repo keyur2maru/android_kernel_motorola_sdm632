@@ -182,6 +182,7 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_RAW_TRACEPOINT_WRITABLE = 24,
 	BPF_PROG_TYPE_CGROUP_SOCKOPT = 25,
 	BPF_PROG_TYPE_TRACING = 26,
+	BPF_PROG_TYPE_FUSE = 31,
 };
 
 enum bpf_attach_type {
