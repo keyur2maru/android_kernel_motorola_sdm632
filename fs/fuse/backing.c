@@ -1092,8 +1092,11 @@ int fuse_mknod_backing(
 		return -EBADF;
 
 	inode_lock_nested(backing_inode, I_MUTEX_PARENT);
+	mode = fmi->mode;
+	if (!IS_POSIXACL(backing_inode))
+		mode &= ~fmi->umask;
 	err = vfs_mknod(backing_inode, backing_path.dentry,
-			fmi->mode & ~fmi->umask, new_decode_dev(fmi->rdev));
+			mode, new_decode_dev(fmi->rdev));
 	inode_unlock(backing_inode);
 	if (err)
 		goto out;
@@ -1166,7 +1169,10 @@ int fuse_mkdir_backing(
 		return -EBADF;
 
 	inode_lock_nested(backing_inode, I_MUTEX_PARENT);
-	err = vfs_mkdir(backing_inode, backing_path.dentry, fmi->mode & ~fmi->umask);
+	mode = fmi->mode;
+	if (!IS_POSIXACL(backing_inode))
+		mode &= ~fmi->umask;
+	err = vfs_mkdir(backing_inode, backing_path.dentry, mode);
 	if (err)
 		goto out;
 	if (d_really_is_negative(backing_path.dentry) ||
