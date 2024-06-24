@@ -33,6 +33,7 @@
 #include <linux/if_packet.h>
 #include <linux/if_arp.h>
 #include <linux/gfp.h>
+#include <net/addrconf.h>
 #include <net/inet_common.h>
 #include <net/ip.h>
 #include <net/protocol.h>
