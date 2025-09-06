@@ -2341,6 +2341,28 @@ static const struct bpf_func_proto bpf_xdp_adjust_head_proto = {
 	.arg2_type	= ARG_ANYTHING,
 };
 
+static int __bpf_tx_xdp(struct net_device *dev,
+			struct bpf_map *map,
+			struct xdp_buff *xdp,
+			u32 index)
+{
+	int err;
+
+	if (!dev->netdev_ops->ndo_xdp_xmit) {
+		bpf_warn_invalid_xdp_redirect(dev->ifindex);
+		return -EOPNOTSUPP;
+	}
+	err = dev->netdev_ops->ndo_xdp_xmit(dev, xdp);
+	if (err)
+		return err;
+	if (map)
+		__dev_map_insert_ctx(map, index);
+	else
+		dev->netdev_ops->ndo_xdp_flush(dev);
+
+	return 0;
+}
+
 static inline bool xdp_map_invalid(const struct bpf_prog *xdp_prog,
 				   unsigned long aux)
 {
@@ -2384,28 +2406,6 @@ static int xdp_do_redirect_map(struct net_device *dev, struct xdp_buff *xdp,
 out:
 	trace_xdp_redirect(dev, fwd, xdp_prog, XDP_REDIRECT, err);
 	return err;
-}
-
-static int __bpf_tx_xdp(struct net_device *dev,
-			struct bpf_map *map,
-			struct xdp_buff *xdp,
-			u32 index)
-{
-	int err;
-
-	if (!dev->netdev_ops->ndo_xdp_xmit) {
-		bpf_warn_invalid_xdp_redirect(dev->ifindex);
-		return -EOPNOTSUPP;
-	}
-	err = dev->netdev_ops->ndo_xdp_xmit(dev, xdp);
-	if (err)
-		return err;
-	if (map)
-		__dev_map_insert_ctx(map, index);
-	else
-		dev->netdev_ops->ndo_xdp_flush(dev);
-
-	return 0;
 }
 
 void xdp_do_flush_map(void)
