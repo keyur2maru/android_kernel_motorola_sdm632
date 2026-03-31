@@ -418,6 +418,13 @@ static bool is_cmpxchg_insn(const struct bpf_insn *insn)
 	       insn->imm == BPF_CMPXCHG;
 }
 
+static bool is_atomic_fetch_insn(const struct bpf_insn *insn)
+{
+	return BPF_CLASS(insn->code) == BPF_STX &&
+	       BPF_MODE(insn->code) == BPF_ATOMIC &&
+	       (insn->imm & BPF_FETCH);
+}
+
 /* string representation of 'enum bpf_reg_type' */
 static const char * const reg_type_str[] = {
 	[NOT_INIT]		= "?",
@@ -1774,10 +1781,20 @@ static int backtrack_insn(struct bpf_verifier_env *env, int idx,
 			   * dreg still needs precision before this insn
 			   */
 		}
-	} else if (class == BPF_LDX) {
-		if (!(*reg_mask & dreg))
+	} else if (class == BPF_LDX || is_atomic_fetch_insn(insn)) {
+		u32 load_reg = dreg;
+
+		/* Atomic fetch operations write the old value into a register
+		 * (src_reg, or r0 for BPF_CMPXCHG); if it was tracked for
+		 * precision, propagate to the stack slot like a regular ldx.
+		 */
+		if (is_atomic_fetch_insn(insn))
+			load_reg = insn->imm == BPF_CMPXCHG ?
+				   (1u << BPF_REG_0) : sreg;
+
+		if (!(*reg_mask & load_reg))
 			return 0;
-		*reg_mask &= ~dreg;
+		*reg_mask &= ~load_reg;
 
 		/* scalars can only be spilled into stack w/o losing precision.
 		 * Load from any other memory can be zero extended.
