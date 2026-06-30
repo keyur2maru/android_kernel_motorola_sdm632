@@ -555,6 +555,12 @@ int avtab_read_item(struct avtab *a, void *fp, struct policydb *pol,
 		if (avtab_android_m_compat ||
 			    ((xperms.specified != AVTAB_XPERMS_IOCTLFUNCTION) &&
 			    (xperms.specified != AVTAB_XPERMS_IOCTLDRIVER) &&
+			    /* channel A17: A17 sepolicy carries netlink xperms
+			     * (specified == 0x03); treat it as a known modern
+			     * xperms type so it is parsed with the standard
+			     * driver-byte layout instead of M-compat (which
+			     * would desync the stream and fail the policy load). */
+			    (xperms.specified != AVTAB_XPERMS_NLMSG) &&
 			    (vers == POLICYDB_VERSION_XPERMS_IOCTL))) {
 			xperms.driver = xperms.specified;
 			if (android_m_compat_optype)

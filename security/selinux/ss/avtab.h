@@ -58,6 +58,17 @@ struct avtab_extended_perms {
 /* These are not flags. All 256 values may be used */
 #define AVTAB_XPERMS_IOCTLFUNCTION	0x01
 #define AVTAB_XPERMS_IOCTLDRIVER	0x02
+/*
+ * channel A17 bring-up: Android 13+/A17 sepolicy emits netlink-message
+ * extended-permission avtab rules whose on-disk xperms.specified byte == 0x03
+ * (AVTAB_XPERMS_NLMSG, a SELinux feature newer than this 4.9 kernel). Without
+ * recognising it, avtab_read_item() mistakes 0x03 for the legacy "Android M"
+ * compat format, skips the driver byte, desyncs the policy stream and the
+ * load aborts with "avtab: invalid type or class" (PID 1 reboot loop).
+ * Recognising the value lets the rule parse with the standard on-disk layout
+ * (specified + driver + 256-bit perms). Same numeric value as mainline.
+ */
+#define AVTAB_XPERMS_NLMSG		0x03
 	/* extension of the avtab_key specified */
 	u8 specified; /* ioctl, netfilter, ... */
 	/*
