@@ -325,4 +325,13 @@ static inline bool inet_get_convert_csum(struct sock *sk)
 	return !!inet_sk(sk)->convert_csum;
 }
 
+static inline int inet_sdif(const struct sk_buff *skb)
+{
+#if IS_ENABLED(CONFIG_NET_L3_MASTER_DEV)
+	if (skb && ipv4_l3mdev_skb(IPCB(skb)->flags))
+		return IPCB(skb)->iif;
+#endif
+	return 0;
+}
+
 #endif	/* _INET_SOCK_H */
