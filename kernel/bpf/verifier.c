@@ -2681,7 +2681,8 @@ static bool is_flow_key_reg(struct bpf_verifier_env *env, int regno)
 	return reg->type == PTR_TO_FLOW_KEYS;
 }
 
-static int check_pkt_ptr_alignment(const struct bpf_reg_state *reg,
+static int check_pkt_ptr_alignment(struct bpf_verifier_env *env,
+				   const struct bpf_reg_state *reg,
 				   int off, int size, bool strict)
 {
 	struct tnum reg_off;
@@ -4844,7 +4845,7 @@ static int sanitize_check_bounds(struct bpf_verifier_env *env,
 		}
 		break;
 	case PTR_TO_MAP_VALUE:
-		if (check_map_access(env, dst, dst_reg->off, 1)) {
+		if (check_map_access(env, dst, dst_reg->off, 1, false)) {
 			verbose(env, "R%d pointer arithmetic of map value goes out of range, "
 				"prohibited for !root\n", dst);
 			return -EACCES;
@@ -4887,7 +4888,7 @@ static int adjust_ptr_min_max_vals(struct bpf_verifier_env *env,
 		/* Taint dst register if offset had invalid bounds derived from
 		 * e.g. dead branches.
 		 */
-		__mark_reg_unknown(dst_reg);
+		__mark_reg_unknown(env, dst_reg);
 		return 0;
 	}
 
@@ -7035,7 +7036,7 @@ static int check_return_code(struct bpf_verifier_env *env)
 		return 0;
 	}
 
-	reg = &env->cur_state.regs[BPF_REG_0];
+	reg = cur_regs(env) + BPF_REG_0;
 	if (reg->type != SCALAR_VALUE) {
 		verbose(env, "At program exit the register R0 is not a known value (%s)\n",
 			reg_type_str[reg->type]);
@@ -7926,12 +7927,6 @@ static bool func_states_equal(struct bpf_verifier_env *env, struct bpf_func_stat
 {
 	int i;
 
-	/* Verification state from speculative execution simulation
-	 * must never prune a non-speculative execution one.
-	 */
-	if (old->speculative && !cur->speculative)
-		return false;
-
 	memset(env->idmap_scratch, 0, sizeof(env->idmap_scratch));
 	for (i = 0; i < MAX_BPF_REG; i++)
 		if (!regsafe(&old->regs[i], &cur->regs[i], env->idmap_scratch))
@@ -7953,6 +7948,12 @@ static bool states_equal(struct bpf_verifier_env *env,
 	int i;
 
 	if (old->curframe != cur->curframe)
+		return false;
+
+	/* Verification state from speculative execution simulation
+	 * must never prune a non-speculative execution one.
+	 */
+	if (old->speculative && !cur->speculative)
 		return false;
 
 	if (old->active_spin_lock != cur->active_spin_lock)
@@ -9709,7 +9710,6 @@ static int fixup_bpf_calls(struct bpf_verifier_env *env)
 	struct bpf_prog *new_prog;
 	struct bpf_map *map_ptr;
 	int i, cnt, delta = 0;
-	struct bpf_insn_aux_data *aux;
 
 
 	for (i = 0; i < insn_cnt; i++, insn++) {

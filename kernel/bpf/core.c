@@ -392,18 +392,6 @@ static int bpf_adj_branches(struct bpf_prog *prog, u32 pos, s32 end_old,
 		     BPF_CLASS(code) != BPF_JMP32) ||
 		    BPF_OP(code) == BPF_EXIT)
 			continue;
-		if (BPF_OP(code) == BPF_EXIT)
-			continue;
-		if (BPF_OP(code) == BPF_CALL) {
-			if (insn->src_reg == BPF_PSEUDO_CALL)
-				pseudo_call = true;
-			else
-				continue;
-		} else {
-			pseudo_call = false;
-		}
-		off = pseudo_call ? insn->imm : insn->off;
-
 		/* Adjust offset of jmps if we cross patch boundaries. */
 		if (BPF_OP(code) == BPF_CALL) {
 			if (insn->src_reg != BPF_PSEUDO_CALL)
