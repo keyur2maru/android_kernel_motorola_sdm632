@@ -695,6 +695,40 @@ const char *kdb_walk_kallsyms(loff_t *pos)
 }
 #endif	/* CONFIG_KGDB_KDB */
 
+static inline int kallsyms_for_perf(void)
+{
+#ifdef CONFIG_PERF_EVENTS
+	extern int sysctl_perf_event_paranoid;
+	if (sysctl_perf_event_paranoid <= 1)
+		return 1;
+#endif
+	return 0;
+}
+
+/*
+ * We show kallsyms information even to normal users if we've enabled
+ * kernel profiling and are explicitly not paranoid (so kptr_restrict
+ * is clear, and sysctl_perf_event_paranoid isn't set).
+ *
+ * kernel.kptr_restrict controls the potentially sensitive kallsyms
+ * information leaks to normal users.
+ */
+int kallsyms_show_value(void)
+{
+	switch (kptr_restrict) {
+	case 0:
+		if (kallsyms_for_perf())
+			return 1;
+	/* fallthrough */
+	case 1:
+		if (has_capability_noaudit(current, CAP_SYSLOG))
+			return 1;
+	/* fallthrough */
+	default:
+		return 0;
+	}
+}
+
 static const struct file_operations kallsyms_operations = {
 	.open = kallsyms_open,
 	.read = seq_read,
