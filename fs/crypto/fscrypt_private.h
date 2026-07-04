@@ -24,6 +24,19 @@
 #define FS_CASEFOLD_FL		0x40000000 /* Casefolded file */
 #endif
 
+/*
+ * QCOM ICE compat, kernel side.  The uapi copies live in the userspace-only
+ * section of <uapi/linux/fscrypt.h>, so define them here for fscrypt_ice.c.
+ * ICE stays dormant under the software v2 policy (ci_data_mode is never set to
+ * FS_ENCRYPTION_MODE_PRIVATE), but the code must still build under CONFIG_PFK.
+ */
+#ifndef FS_ENCRYPTION_MODE_PRIVATE
+#define FS_ENCRYPTION_MODE_PRIVATE	127
+#endif
+#ifndef FS_MAX_KEY_SIZE
+#define FS_MAX_KEY_SIZE			FSCRYPT_MAX_KEY_SIZE
+#endif
+
 #define FS_KEY_DERIVATION_NONCE_SIZE	16
 
 #define FSCRYPT_MIN_KEY_SIZE		16
@@ -255,6 +268,15 @@ struct fscrypt_info {
 
 	/* Hashed inode number.  Only set for IV_INO_LBLK_32 */
 	u32 ci_hashed_ino;
+
+#ifdef CONFIG_PFK
+	/*
+	 * QCOM ICE (inline crypto engine).  Only populated for the PRIVATE data
+	 * mode; unused under the software v2 policy this device ships with.
+	 */
+	u8 ci_data_mode;
+	u8 ci_raw_key[FS_MAX_KEY_SIZE];
+#endif
 };
 
 typedef enum {

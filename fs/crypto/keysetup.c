@@ -45,6 +45,14 @@ struct fscrypt_mode fscrypt_modes[] = {
 	},
 };
 
+int fscrypt_get_mode_key_size(int mode)
+{
+	if (mode < 0 || mode >= (int)ARRAY_SIZE(fscrypt_modes))
+		return 0;
+	return fscrypt_modes[mode].keysize;
+}
+EXPORT_SYMBOL(fscrypt_get_mode_key_size);
+
 static struct fscrypt_mode *
 select_encryption_mode(const union fscrypt_policy *policy,
 		       const struct inode *inode)
