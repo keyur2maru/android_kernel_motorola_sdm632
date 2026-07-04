@@ -5,11 +5,10 @@
  */
 #include "zdata.h"
 #include "compress.h"
-#include <linux/slab.h>
-#include <linux/sched.h>
 #include <linux/overflow.h>
 #include <linux/prefetch.h>
 #include <linux/vmalloc.h>
+#include <linux/slab.h>
 #include <linux/cpuhotplug.h>
 
 #include <trace/events/erofs.h>
@@ -142,18 +141,19 @@ static void erofs_destroy_percpu_workers(void)
 
 static struct kthread_worker *erofs_init_percpu_worker(int cpu)
 {
-	struct sched_param sp;
+	struct sched_param param;
+
 	struct kthread_worker *worker =
 		kthread_create_worker_on_cpu(cpu, 0, "erofs_worker/%u", cpu);
 
 	if (IS_ERR(worker))
 		return worker;
-	if (IS_ENABLED(CONFIG_EROFS_FS_PCPU_KTHREAD_HIPRI)) {
-		sp.sched_priority = 1;
-		sched_setscheduler_nocheck(worker->task, SCHED_FIFO, &sp);
+	if (IS_ENABLED(CONFIG_EROFS_FS_PCPU_KTHREAD_HIPRI)){
+		param.sched_priority = 1;
+		sched_setscheduler_nocheck(worker->task, SCHED_FIFO, &param);
 	} else {
-		sp.sched_priority = 0;
-		sched_setscheduler_nocheck(worker->task, SCHED_NORMAL, &sp);
+		param.sched_priority = 0;
+		sched_setscheduler_nocheck(worker->task, SCHED_FIFO, &param);
 	}
 	return worker;
 }
@@ -943,6 +943,7 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 	}
 	z_erofs_decompressqueue_work(&io->u.work);
 }
+
 
 static bool z_erofs_page_is_invalidated(struct page *page)
 {

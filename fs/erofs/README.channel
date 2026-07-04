@@ -1,0 +1,26 @@
+EROFS (Enhanced Read-Only File System) — provenance note for the channel fork
+==============================================================================
+
+This directory is a backport of the in-kernel EROFS filesystem into the
+Motorola SDM632 (msm8953) 4.9 kernel used by the "channel" (Moto G7 Play)
+AOSP-17 build.
+
+Origin of this backport
+------------------------
+The sources here were backported from a Xiaomi msm8953 4.9 kernel tree that
+had already staged EROFS onto the 4.9 series, specifically the community trees:
+
+  - github: Renzprjkt/bananadroid  (kernel_xiaomi_ysl_erofs)
+  - github: android_kernel_xiaomi_msm8953
+
+Ultimate upstream
+-----------------
+The canonical upstream of these files is the mainline Linux kernel `fs/erofs/`
+subsystem, originally contributed by Huawei (Gao Xiang / Chao Yu et al.).
+
+License
+-------
+GPL-2.0-only. The original per-file GPL copyright headers (including the
+Huawei copyright notices) are preserved unmodified in the source files of this
+directory; this note records only the backport provenance and does not alter
+those headers.
