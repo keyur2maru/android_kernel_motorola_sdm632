@@ -2161,9 +2161,6 @@ enum {
 					 * window (in packets) or -1 if default
 					 * value should be used
 					 */
-	BPF_SOCK_OPS_NEEDS_ECN,		/* If connection's congestion control
-					 * needs ECN
-					 */
 	BPF_SOCK_OPS_TCP_CONNECT_CB,	/* Calls BPF program right before an
 					 * active connection is initialized
 					 */
