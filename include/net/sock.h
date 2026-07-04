@@ -439,6 +439,7 @@ struct sock {
 	struct socket		*sk_socket;
 	void			*sk_user_data;
 	struct page_frag	sk_frag;
+	unsigned long		sk_tsq_flags;
 	struct sk_buff		*sk_send_head;
 	__s32			sk_peek_off;
 	int			sk_write_pending;
