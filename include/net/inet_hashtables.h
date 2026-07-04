@@ -306,7 +306,7 @@ static inline struct sock *__inet_lookup(struct net *net,
 					 struct sk_buff *skb, int doff,
 					 const __be32 saddr, const __be16 sport,
 					 const __be32 daddr, const __be16 dport,
-					 const int dif,
+					 const int dif, const int sdif,
 					 bool *refcounted)
 {
 	u16 hnum = ntohs(dport);
@@ -333,7 +333,7 @@ static inline struct sock *inet_lookup(struct net *net,
 	bool refcounted;
 
 	sk = __inet_lookup(net, hashinfo, skb, doff, saddr, sport, daddr,
-			   dport, dif, &refcounted);
+			   dport, dif, 0, &refcounted);
 
 	if (sk && !refcounted && !atomic_inc_not_zero(&sk->sk_refcnt))
 		sk = NULL;
@@ -356,7 +356,7 @@ static inline struct sock *__inet_lookup_skb(struct inet_hashinfo *hashinfo,
 
 	return __inet_lookup(dev_net(skb_dst(skb)->dev), hashinfo, skb,
 			     doff, iph->saddr, sport,
-			     iph->daddr, dport, inet_iif(skb),
+			     iph->daddr, dport, inet_iif(skb), inet_sdif(skb),
 			     refcounted);
 }
 

@@ -226,6 +226,47 @@ static void __skb_flow_bpf_to_target(const struct bpf_flow_keys *flow_keys,
  	}
 }
 
+bool __skb_flow_bpf_dissect(struct bpf_prog *prog,
+			    const struct sk_buff *skb,
+			    struct flow_dissector *flow_dissector,
+			    struct bpf_flow_keys *flow_keys)
+{
+	struct bpf_skb_data_end cb_saved;
+	struct bpf_skb_data_end *cb;
+	u32 result;
+
+	/* Note that even though the const qualifier is discarded
+	 * throughout the execution of the BPF program, all changes(the
+	 * control block) are reverted after the BPF program returns.
+	 * Therefore, __skb_flow_dissect does not alter the skb.
+	 */
+
+	cb = (struct bpf_skb_data_end *)skb->cb;
+
+	/* Save Control Block */
+	memcpy(&cb_saved, cb, sizeof(cb_saved));
+	memset(cb, 0, sizeof(cb_saved));
+
+	/* Pass parameters to the BPF program */
+	memset(flow_keys, 0, sizeof(*flow_keys));
+	cb->qdisc_cb.flow_keys = flow_keys;
+	flow_keys->nhoff = skb_network_offset(skb);
+	flow_keys->thoff = flow_keys->nhoff;
+
+	bpf_compute_data_pointers((struct sk_buff *)skb);
+	result = BPF_PROG_RUN(prog, skb);
+
+	/* Restore state */
+	memcpy(cb, &cb_saved, sizeof(cb_saved));
+
+	flow_keys->nhoff = clamp_t(u16, flow_keys->nhoff,
+				   flow_keys->nhoff, skb->len);
+	flow_keys->thoff = clamp_t(u16, flow_keys->thoff,
+				   flow_keys->nhoff, skb->len);
+
+	return result == BPF_OK;
+}
+
 /**
  * __skb_flow_dissect - extract the flow_keys struct and return it
  * @skb: sk_buff to extract the flow from, can be NULL if the rest are specified
