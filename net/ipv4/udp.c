@@ -494,7 +494,8 @@ static struct sock *udp4_lib_lookup2(struct net *net,
  */
 struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
 		__be16 sport, __be32 daddr, __be16 dport,
-		int dif, struct udp_table *udptable, struct sk_buff *skb)
+		int dif, int sdif, struct udp_table *udptable,
+		struct sk_buff *skb)
 {
 	struct sock *sk, *result;
 	unsigned short hnum = ntohs(dport);
@@ -568,7 +569,7 @@ static inline struct sock *__udp4_lib_lookup_skb(struct sk_buff *skb,
 	const struct iphdr *iph = ip_hdr(skb);
 
 	return __udp4_lib_lookup(dev_net(skb->dev), iph->saddr, sport,
-				 iph->daddr, dport, inet_iif(skb),
+				 iph->daddr, dport, inet_iif(skb), inet_sdif(skb),
 				 udptable, skb);
 }
 
@@ -578,7 +579,7 @@ struct sock *udp4_lib_lookup_skb(struct sk_buff *skb,
 	const struct iphdr *iph = ip_hdr(skb);
 
 	return __udp4_lib_lookup(dev_net(skb->dev), iph->saddr, sport,
-				 iph->daddr, dport, inet_iif(skb),
+				 iph->daddr, dport, inet_iif(skb), inet_sdif(skb),
 				 &udp_table, NULL);
 }
 EXPORT_SYMBOL_GPL(udp4_lib_lookup_skb);
@@ -594,7 +595,7 @@ struct sock *udp4_lib_lookup(struct net *net, __be32 saddr, __be16 sport,
 	struct sock *sk;
 
 	sk = __udp4_lib_lookup(net, saddr, sport, daddr, dport,
-			       dif, &udp_table, NULL);
+			       dif, 0, &udp_table, NULL);
 	if (sk && !atomic_inc_not_zero(&sk->sk_refcnt))
 		sk = NULL;
 	return sk;

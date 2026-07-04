@@ -172,7 +172,7 @@ struct sock *inet6_lookup(struct net *net, struct inet_hashinfo *hashinfo,
 	bool refcounted;
 
 	sk = __inet6_lookup(net, hashinfo, skb, doff, saddr, sport, daddr,
-			    ntohs(dport), dif, &refcounted);
+			    ntohs(dport), dif, 0, &refcounted);
 	if (sk && !refcounted && !atomic_inc_not_zero(&sk->sk_refcnt))
 		sk = NULL;
 	return sk;

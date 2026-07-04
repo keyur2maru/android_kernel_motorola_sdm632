@@ -46,6 +46,7 @@
 #include <net/dcbnl.h>
 #endif
 #include <net/netprio_cgroup.h>
+#include <net/xdp.h>
 
 #include <linux/netdev_features.h>
 #include <linux/neighbour.h>
@@ -679,6 +680,11 @@ bool rps_may_expire_flow(struct net_device *dev, u16 rxq_index, u32 flow_id,
 #endif /* CONFIG_RPS */
 
 /* This structure contains an instance of an RX queue. */
+/* Should be used for queue_mapping/skb_set_queue_mapping to signify that
+ * a queue mapping was not set.
+ */
+#define NO_QUEUE_MAPPING	0xffff
+
 struct netdev_rx_queue {
 #ifdef CONFIG_RPS
 	struct rps_map __rcu		*rps_map;
@@ -686,6 +692,7 @@ struct netdev_rx_queue {
 #endif
 	struct kobject			kobj;
 	struct net_device		*dev;
+	struct xdp_rxq_info		xdp_rxq;
 } ____cacheline_aligned_in_smp;
 
 /*

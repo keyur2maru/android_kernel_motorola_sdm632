@@ -66,7 +66,7 @@ static inline struct sock *__inet6_lookup(struct net *net,
 					  const __be16 sport,
 					  const struct in6_addr *daddr,
 					  const u16 hnum,
-					  const int dif,
+					  const int dif, const int sdif,
 					  bool *refcounted)
 {
 	struct sock *sk = __inet6_lookup_established(net, hashinfo, saddr,
@@ -95,7 +95,7 @@ static inline struct sock *__inet6_lookup_skb(struct inet_hashinfo *hashinfo,
 	return __inet6_lookup(dev_net(skb_dst(skb)->dev), hashinfo, skb,
 			      doff, &ipv6_hdr(skb)->saddr, sport,
 			      &ipv6_hdr(skb)->daddr, ntohs(dport),
-			      iif, refcounted);
+			      iif, inet6_sdif(skb), refcounted);
 }
 
 struct sock *inet6_lookup(struct net *net, struct inet_hashinfo *hashinfo,

@@ -1159,6 +1159,12 @@ bool __skb_flow_dissect(const struct sk_buff *skb,
 			void *data, __be16 proto, int nhoff, int hlen,
 			unsigned int flags);
 
+struct bpf_flow_keys;
+bool __skb_flow_bpf_dissect(struct bpf_prog *prog,
+			    const struct sk_buff *skb,
+			    struct flow_dissector *flow_dissector,
+			    struct bpf_flow_keys *flow_keys);
+
 static inline bool skb_flow_dissect(const struct sk_buff *skb,
 				    struct flow_dissector *flow_dissector,
 				    void *target_container, unsigned int flags)
