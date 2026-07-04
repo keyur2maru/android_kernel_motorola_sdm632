@@ -39,6 +39,14 @@
 #define KGSL_IOMMU_SVM_BASE32		0x300000
 #define KGSL_IOMMU_SVM_END32		(0xC0000000 - SZ_16M)
 
+/*
+ * channel A17 bring-up NOTE: stock values. The A10 Adreno blob mis-addresses render buffers
+ * by ~256MB (GPU faults 0x10000000 below where kgsl maps them). A kernel-side IOMMU shift
+ * (map 256MB below memdesc->gpuaddr) was tried and REVERTED -- it only half-worked because
+ * the blob references buffers at BOTH reported AND reported-256MB-0x900 (UBWC two-plane).
+ * See channel/SDM-NEXT.md section (c). The real fix is likely gralloc-side (force non-UBWC
+ * EGL/render buffers), not here.
+ */
 #define KGSL_IOMMU_VA_BASE64		0x500000000ULL
 #define KGSL_IOMMU_VA_END64		0x600000000ULL
 /*
