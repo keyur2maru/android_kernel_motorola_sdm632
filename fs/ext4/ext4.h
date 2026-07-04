@@ -3199,6 +3199,10 @@ extern int ext4_move_extents(struct file *o_filp, struct file *d_filp,
 			     __u64 start_orig, __u64 start_donor,
 			     __u64 len, __u64 *moved_len);
 
+/* readpage.c */
+extern int __init ext4_init_post_read_processing(void);
+extern void ext4_exit_post_read_processing(void);
+
 /* page-io.c */
 extern int __init ext4_init_pageio(void);
 extern void ext4_exit_pageio(void);
