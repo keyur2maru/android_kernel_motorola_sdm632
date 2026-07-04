@@ -7,11 +7,14 @@
 
 #include <net/sock_reuseport.h>
 #include <linux/bpf.h>
+#include <linux/idr.h>
 #include <linux/rcupdate.h>
 
 #define INIT_SOCKS 128
 
-static DEFINE_SPINLOCK(reuseport_lock);
+DEFINE_SPINLOCK(reuseport_lock);
+
+static DEFINE_IDA(reuseport_ida);
 
 static struct sock_reuseport *__reuseport_alloc(u16 max_socks)
 {
@@ -111,7 +114,28 @@ static void reuseport_free_rcu(struct rcu_head *head)
 	reuse = container_of(head, struct sock_reuseport, rcu);
 	if (reuse->prog)
 		bpf_prog_destroy(reuse->prog);
+	if (reuse->reuseport_id)
+		ida_simple_remove(&reuseport_ida, reuse->reuseport_id);
 	kfree(reuse);
+}
+
+int reuseport_get_id(struct sock_reuseport *reuse)
+{
+	int id;
+
+	if (reuse->reuseport_id)
+		return reuse->reuseport_id;
+
+	id = ida_simple_get(&reuseport_ida, 1, 0, GFP_ATOMIC);
+	/* Called under reuseport_lock, so the reuseport_id can't be
+	 * assigned to a different sk group.
+	 */
+	if (id < 0)
+		return id;
+
+	reuse->reuseport_id = id;
+
+	return reuse->reuseport_id;
 }
 
 /**
