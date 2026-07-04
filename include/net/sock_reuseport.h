@@ -6,6 +6,8 @@
 #include <linux/types.h>
 #include <net/sock.h>
 
+extern spinlock_t reuseport_lock;
+
 struct sock_reuseport {
 	struct rcu_head		rcu;
 
@@ -32,5 +34,6 @@ extern struct sock *reuseport_select_sock(struct sock *sk,
 					  int hdr_len);
 extern struct bpf_prog *reuseport_attach_prog(struct sock *sk,
 					      struct bpf_prog *prog);
+extern int reuseport_get_id(struct sock_reuseport *reuse);
 
 #endif  /* _SOCK_REUSEPORT_H */
