@@ -226,6 +226,23 @@ static void dev_map_free(struct bpf_map *map)
 		kfree(dev);
 	}
 
+	/* DEVMAP_HASH type maps keep their entries in the index hash rather
+	 * than in netdev_map[], so release those separately.
+	 */
+	if (dtab->dev_index_head) {
+		struct bpf_dtab_netdev *dev;
+		struct hlist_node *tmp;
+		u32 b;
+
+		for (b = 0; b < dtab->n_buckets; b++)
+			hlist_for_each_entry_safe(dev, tmp,
+						  &dtab->dev_index_head[b],
+						  index_hlist) {
+				dev_put(dev->dev);
+				kfree(dev);
+			}
+	}
+
 	free_percpu(dtab->flush_needed);
 	bpf_map_area_free(dtab->netdev_map);
 	kfree(dtab->dev_index_head);
