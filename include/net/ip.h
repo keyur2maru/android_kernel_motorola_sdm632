@@ -59,15 +59,6 @@ static inline bool ipv4_l3mdev_skb(u16 flags)
 	return !!(flags & IPSKB_L3SLAVE);
 }
 
-static inline int inet_sdif(const struct sk_buff *skb)
-{
-#if IS_ENABLED(CONFIG_NET_L3_MASTER_DEV)
-	if (skb && ipv4_l3mdev_skb(IPCB(skb)->flags))
-		return IPCB(skb)->iif;
-#endif
-	return 0;
-}
-
 static inline unsigned int ip_hdrlen(const struct sk_buff *skb)
 {
 	return ip_hdr(skb)->ihl * 4;
