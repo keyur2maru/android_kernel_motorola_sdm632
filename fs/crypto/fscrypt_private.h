@@ -13,9 +13,16 @@
 #include <linux/fscrypt.h>
 #include <linux/siphash.h>
 #include <crypto/hash.h>
-#include <linux/bio-crypt-ctx.h>
 
 #define CONST_STRLEN(str)	(sizeof(str) - 1)
+
+/* This 4.9 tree has no CONFIG_UNICODE casefolding; provide fallbacks. */
+#ifndef IS_CASEFOLDED
+#define IS_CASEFOLDED(inode)	0
+#endif
+#ifndef FS_CASEFOLD_FL
+#define FS_CASEFOLD_FL		0x40000000 /* Casefolded file */
+#endif
 
 #define FS_KEY_DERIVATION_NONCE_SIZE	16
 
@@ -327,8 +334,7 @@ void fscrypt_destroy_hkdf(struct fscrypt_hkdf *hkdf);
 
 /* inline_crypt.c */
 #ifdef CONFIG_FS_ENCRYPTION_INLINE_CRYPT
-extern int fscrypt_select_encryption_impl(struct fscrypt_info *ci,
-					  bool is_hw_wrapped_key);
+extern int fscrypt_select_encryption_impl(struct fscrypt_info *ci);
 
 static inline bool
 fscrypt_using_inline_encryption(const struct fscrypt_info *ci)
@@ -340,7 +346,6 @@ extern int fscrypt_prepare_inline_crypt_key(
 					struct fscrypt_prepared_key *prep_key,
 					const u8 *raw_key,
 					unsigned int raw_key_size,
-					bool is_hw_wrapped,
 					const struct fscrypt_info *ci);
 
 extern void fscrypt_destroy_inline_crypt_key(
@@ -372,8 +377,7 @@ fscrypt_is_key_prepared(struct fscrypt_prepared_key *prep_key,
 
 #else /* CONFIG_FS_ENCRYPTION_INLINE_CRYPT */
 
-static inline int fscrypt_select_encryption_impl(struct fscrypt_info *ci,
-						 bool is_hw_wrapped_key)
+static inline int fscrypt_select_encryption_impl(struct fscrypt_info *ci)
 {
 	return 0;
 }
@@ -387,7 +391,6 @@ static inline bool fscrypt_using_inline_encryption(
 static inline int
 fscrypt_prepare_inline_crypt_key(struct fscrypt_prepared_key *prep_key,
 				 const u8 *raw_key, unsigned int raw_key_size,
-				 bool is_hw_wrapped,
 				 const struct fscrypt_info *ci)
 {
 	WARN_ON(1);
@@ -444,7 +447,7 @@ struct fscrypt_master_key_secret {
 	 */
 	u8			raw[FSCRYPT_MAX_HW_WRAPPED_KEY_SIZE];
 
-} __randomize_layout;
+};
 
 /*
  * fscrypt_master_key - an in-use master key
@@ -526,7 +529,7 @@ struct fscrypt_master_key {
 	siphash_key_t		mk_ino_hash_key;
 	bool			mk_ino_hash_key_initialized;
 
-} __randomize_layout;
+};
 
 static inline bool
 is_master_key_secret_present(const struct fscrypt_master_key_secret *secret)
@@ -584,14 +587,13 @@ struct fscrypt_mode {
 	int keysize;
 	int ivsize;
 	int logged_impl_name;
-	enum blk_crypto_mode_num blk_crypto_mode;
 };
 
 extern struct fscrypt_mode fscrypt_modes[];
 
 int fscrypt_prepare_key(struct fscrypt_prepared_key *prep_key,
 			const u8 *raw_key, unsigned int raw_key_size,
-			bool is_hw_wrapped, const struct fscrypt_info *ci);
+			const struct fscrypt_info *ci);
 
 void fscrypt_destroy_prepared_key(struct fscrypt_prepared_key *prep_key);
 

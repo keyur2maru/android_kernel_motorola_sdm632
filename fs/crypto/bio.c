@@ -99,7 +99,7 @@ int fscrypt_zeroout_range(const struct inode *inode, pgoff_t lblk,
 	bio = bio_alloc(GFP_NOFS, nr_pages);
 
 	do {
-		bio_set_dev(bio, inode->i_sb->s_bdev);
+		bio->bi_bdev = inode->i_sb->s_bdev;
 		bio->bi_iter.bi_sector = pblk << (blockbits - 9);
 		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 

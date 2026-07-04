@@ -25,6 +25,10 @@
 
 #include "fscrypt_private.h"
 
+/* Declared in the private security/keys/internal.h; resolved at link time. */
+extern key_ref_t lookup_user_key(key_serial_t id, unsigned long flags,
+				 key_perm_t perm);
+
 static void wipe_master_key_secret(struct fscrypt_master_key_secret *secret)
 {
 	fscrypt_destroy_hkdf(&secret->hkdf);

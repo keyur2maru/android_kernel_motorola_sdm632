@@ -68,6 +68,14 @@ void fscrypt_free_bounce_page(struct page *bounce_page)
 }
 EXPORT_SYMBOL(fscrypt_free_bounce_page);
 
+/*
+ * Generate the IV for the given logical block number within the given file.
+ * For filenames encryption, lblk_num == 0.
+ *
+ * Keep this in sync with fscrypt_limit_dio_pages().  fscrypt_limit_dio_pages()
+ * needs to know about any IV generation methods where the low bits of IV don't
+ * simply contain the lblk_num (e.g., IV_INO_LBLK_32).
+ */
 void fscrypt_generate_iv(union fscrypt_iv *iv, u64 lblk_num,
 			 const struct fscrypt_info *ci)
 {
@@ -76,8 +84,12 @@ void fscrypt_generate_iv(union fscrypt_iv *iv, u64 lblk_num,
 	memset(iv, 0, ci->ci_mode->ivsize);
 
 	if (flags & FSCRYPT_POLICY_FLAG_IV_INO_LBLK_64) {
-		WARN_ON_ONCE((u32)lblk_num != lblk_num);
+		WARN_ON_ONCE(lblk_num > U32_MAX);
+		WARN_ON_ONCE(ci->ci_inode->i_ino > U32_MAX);
 		lblk_num |= (u64)ci->ci_inode->i_ino << 32;
+	} else if (flags & FSCRYPT_POLICY_FLAG_IV_INO_LBLK_32) {
+		WARN_ON_ONCE(lblk_num > U32_MAX);
+		lblk_num = (u32)(ci->ci_hashed_ino + lblk_num);
 	} else if (flags & FSCRYPT_POLICY_FLAG_DIRECT_KEY) {
 		memcpy(iv->nonce, ci->ci_nonce, FS_KEY_DERIVATION_NONCE_SIZE);
 	}
@@ -95,10 +107,13 @@ int fscrypt_crypt_block(const struct inode *inode, fscrypt_direction_t rw,
 	DECLARE_CRYPTO_WAIT(wait);
 	struct scatterlist dst, src;
 	struct fscrypt_info *ci = inode->i_crypt_info;
-	struct crypto_skcipher *tfm = ci->ci_ctfm;
+	struct crypto_skcipher *tfm = ci->ci_key.tfm;
 	int res = 0;
 
-	BUG_ON(len == 0);
+	if (WARN_ON_ONCE(len <= 0))
+		return -EINVAL;
+	if (WARN_ON_ONCE(len % FS_CRYPTO_BLOCK_SIZE != 0))
+		return -EINVAL;
 
 	fscrypt_generate_iv(&iv, lblk_num, ci);
 
@@ -121,10 +136,8 @@ int fscrypt_crypt_block(const struct inode *inode, fscrypt_direction_t rw,
 		res = crypto_wait_req(crypto_skcipher_encrypt(req), &wait);
 	skcipher_request_free(req);
 	if (res) {
-		fscrypt_err(inode->i_sb,
-			    "%scryption failed for inode %lu, block %llu: %d",
-			    (rw == FS_DECRYPT ? "de" : "en"),
-			    inode->i_ino, lblk_num, res);
+		fscrypt_err(inode, "%scryption failed for block %llu: %d",
+			    (rw == FS_DECRYPT ? "De" : "En"), lblk_num, res);
 		return res;
 	}
 	return 0;
@@ -323,7 +336,7 @@ out_unlock:
 	return err;
 }
 
-void fscrypt_msg(struct super_block *sb, const char *level,
+void fscrypt_msg(const struct inode *inode, const char *level,
 		 const char *fmt, ...)
 {
 	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
@@ -337,8 +350,9 @@ void fscrypt_msg(struct super_block *sb, const char *level,
 	va_start(args, fmt);
 	vaf.fmt = fmt;
 	vaf.va = &args;
-	if (sb)
-		printk("%sfscrypt (%s): %pV\n", level, sb->s_id, &vaf);
+	if (inode)
+		printk("%sfscrypt (%s, inode %lu): %pV\n",
+		       level, inode->i_sb->s_id, inode->i_ino, &vaf);
 	else
 		printk("%sfscrypt: %pV\n", level, &vaf);
 	va_end(args);
@@ -384,19 +398,4 @@ fail_free_queue:
 fail:
 	return err;
 }
-module_init(fscrypt_init)
-
-/**
- * fscrypt_exit() - Shutdown the fs encryption system
- */
-static void __exit fscrypt_exit(void)
-{
-	if (fscrypt_read_workqueue)
-		destroy_workqueue(fscrypt_read_workqueue);
-	kmem_cache_destroy(fscrypt_info_cachep);
-
-	fscrypt_essiv_cleanup();
-}
-module_exit(fscrypt_exit);
-
-MODULE_LICENSE("GPL");
+late_initcall(fscrypt_init)
