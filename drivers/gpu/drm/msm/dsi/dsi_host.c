@@ -117,6 +117,16 @@ struct msm_dsi_host {
 	struct clk *byte_clk_src;
 	struct clk *pixel_clk_src;
 
+	/*
+	 * On msm8953 the byte0/pclk0 RCGs live in the proprietary
+	 * COMMON_CLK_MSM GCC and take their DSI parent from the msm-framework
+	 * mdss-pll (ext_byte0/ext_pclk0), not from the drm 14nm PLL. When these
+	 * optional muxes are wired in DT, reparent the RCGs onto them instead of
+	 * attempting the cross-framework set_parent onto the CCF PLL.
+	 */
+	struct clk *byte_src_mux;
+	struct clk *pixel_src_mux;
+
 	u32 byte_clk_rate;
 	u32 esc_clk_rate;
 
@@ -391,6 +401,19 @@ static int dsi_clk_init(struct msm_dsi_host *msm_host)
 		pr_err("%s: can't find pixel_clk_src. ret=%d\n", __func__, ret);
 		goto exit;
 	}
+
+	/*
+	 * Optional: msm8953 mdss-pll byte/pixel mux sources (ext_byte0/ext_pclk0
+	 * from the msm-framework GCC). Present only when the DT wires them; used
+	 * to reparent the GCC RCGs in msm_dsi_host_set_src_pll(). Absence is not
+	 * an error - other SoCs source byte/pixel from the drm PLL directly.
+	 */
+	msm_host->byte_src_mux = devm_clk_get(dev, "byte_src_mux");
+	if (IS_ERR(msm_host->byte_src_mux))
+		msm_host->byte_src_mux = NULL;
+	msm_host->pixel_src_mux = devm_clk_get(dev, "pixel_src_mux");
+	if (IS_ERR(msm_host->pixel_src_mux))
+		msm_host->pixel_src_mux = NULL;
 
 	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_V2) {
 		msm_host->src_clk = devm_clk_get(dev, "src_clk");
@@ -2079,6 +2102,36 @@ int msm_dsi_host_set_src_pll(struct mipi_dsi_host *host,
 	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
 	struct clk *byte_clk_provider, *pixel_clk_provider;
 	int ret;
+
+	/*
+	 * msm8953: the byte0/pclk0 RCGs are msm-framework (COMMON_CLK_MSM) GCC
+	 * clocks whose real DSI parent is the msm-framework mdss-pll, exposed to
+	 * GCC as ext_byte0/ext_pclk0. Reparent the RCGs onto those muxes here,
+	 * mirroring the downstream fbdev mdss_dsi_set_clk_src(). Do NOT fall
+	 * through to the drm 14nm PLL provider below: that is a CCF clk and
+	 * clk_set_parent() of an msm RCG onto it fails (cross-framework), which
+	 * left pclk0_clk_src/byte0_clk_src stuck on XO (M/N/D=0) and the branch
+	 * clocks stuck-on.
+	 */
+	if (msm_host->byte_src_mux && msm_host->pixel_src_mux) {
+		ret = clk_set_parent(msm_host->byte_clk_src,
+				     msm_host->byte_src_mux);
+		if (ret) {
+			pr_err("%s: can't reparent byte_clk_src to mdss-pll. ret=%d\n",
+			       __func__, ret);
+			return ret;
+		}
+
+		ret = clk_set_parent(msm_host->pixel_clk_src,
+				     msm_host->pixel_src_mux);
+		if (ret) {
+			pr_err("%s: can't reparent pixel_clk_src to mdss-pll. ret=%d\n",
+			       __func__, ret);
+			return ret;
+		}
+
+		return 0;
+	}
 
 	ret = msm_dsi_pll_get_clk_provider(src_pll,
 				&byte_clk_provider, &pixel_clk_provider);

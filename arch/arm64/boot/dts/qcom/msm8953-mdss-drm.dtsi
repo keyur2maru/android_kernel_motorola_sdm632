@@ -93,9 +93,12 @@
 				 <&clock_gcc clk_gcc_mdss_axi_clk>,
 				 <&clock_gcc_mdss clk_gcc_mdss_byte0_clk>,
 				 <&clock_gcc_mdss clk_gcc_mdss_pclk0_clk>,
-				 <&clock_gcc clk_gcc_mdss_esc0_clk>;
+				 <&clock_gcc clk_gcc_mdss_esc0_clk>,
+				 <&clock_gcc_mdss clk_ext_byte0_clk_src>,
+				 <&clock_gcc_mdss clk_ext_pclk0_clk_src>;
 			clock-names = "mdp_core", "iface", "bus",
-				      "byte_clk", "pixel_clk", "core_clk";
+				      "byte_clk", "pixel_clk", "core_clk",
+				      "byte_src_mux", "pixel_src_mux";
 
 			phys = <&dsi0_drm_phy>;
 
