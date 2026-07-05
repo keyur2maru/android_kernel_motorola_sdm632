@@ -805,6 +805,11 @@ int msm_hdmi_modeset_init(struct hdmi *hdmi, struct drm_device *dev,
 void __init msm_hdmi_register(void);
 void __exit msm_hdmi_unregister(void);
 #else
+static inline int msm_hdmi_modeset_init(struct hdmi *hdmi,
+		struct drm_device *dev, struct drm_encoder *encoder)
+{
+	return -EINVAL;
+}
 static inline void __init msm_hdmi_register(void)
 {
 }
@@ -820,6 +825,11 @@ void __exit msm_edp_unregister(void);
 int msm_edp_modeset_init(struct msm_edp *edp, struct drm_device *dev,
 		struct drm_encoder *encoder);
 #else
+static inline int msm_edp_modeset_init(struct msm_edp *edp,
+		struct drm_device *dev, struct drm_encoder *encoder)
+{
+	return -EINVAL;
+}
 static inline void __init msm_edp_register(void)
 {
 }
