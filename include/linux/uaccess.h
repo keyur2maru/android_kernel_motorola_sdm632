@@ -130,6 +130,23 @@ long strncpy_from_user_nofault(char *dst, const void __user *unsafe_addr,
 		long count);
 extern long strnlen_unsafe_user(const void __user *unsafe_addr, long count);
 
+/*
+ * On architectures where the user and kernel address spaces do not overlap
+ * (such as arm64) a kernel-only probe is already "strict", so the *_strict
+ * variants that newer BPF code expects are plain aliases of the base helpers.
+ */
+static __always_inline long
+probe_kernel_read_strict(void *dst, const void *src, size_t size)
+{
+	return probe_kernel_read(dst, src, size);
+}
+
+static __always_inline long
+strncpy_from_unsafe_strict(char *dst, const void *unsafe_addr, long count)
+{
+	return strncpy_from_unsafe(dst, unsafe_addr, count);
+}
+
 /**
  * probe_kernel_address(): safely attempt to read from a location
  * @addr: address to read from
