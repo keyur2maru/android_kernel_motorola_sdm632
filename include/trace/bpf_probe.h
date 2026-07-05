@@ -2,7 +2,17 @@
 
 #undef TRACE_SYSTEM_VAR
 
-#ifdef CONFIG_BPF_EVENTS
+/*
+ * A trace header can opt out of BPF raw tracepoint generation by defining
+ * TRACE_SKIP_BPF_PROBE before including <trace/define_trace.h>. This is needed
+ * for a handful of downstream vendor tracepoints whose signatures are not
+ * expressible as BPF raw tracepoints: those passing a large struct by value
+ * (sizeof not in {1,2,4,8}) or taking more than 12 arguments, both of which the
+ * CAST_TO_U64/bpf_trace_runN machinery below cannot represent. Skipping only
+ * the BPF raw tracepoint attach path leaves the ftrace and perf tracepoints for
+ * these events fully intact.
+ */
+#if defined(CONFIG_BPF_EVENTS) && !defined(TRACE_SKIP_BPF_PROBE)
 
 #undef __entry
 #define __entry entry
