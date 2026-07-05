@@ -682,7 +682,18 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 
 	if (kms) {
 		pm_runtime_get_sync(dev);
-		ret = drm_irq_install(ddev, platform_get_irq(pdev, 0));
+		/*
+		 * Install the KMS irq handler on kms->irq. For MDP5 that is the
+		 * sub-block virq mapped out of the mdss interrupt-controller
+		 * domain (mdp5_kms_init: irq_of_parse_and_map on the mdp child),
+		 * which is the line the mdss demux (mdss_irq) dispatches vblank
+		 * on. Installing on the top mdss GIC irq instead would collide
+		 * with the mdss demux handler and starve MDP5 of vblank. SDE
+		 * leaves kms->irq unset and drives its own irq, so fall back to
+		 * the platform irq there. MDP4 sets kms->irq to the same value.
+		 */
+		ret = drm_irq_install(ddev,
+				kms->irq ? kms->irq : platform_get_irq(pdev, 0));
 		pm_runtime_put_sync(dev);
 		if (ret < 0) {
 			dev_err(dev, "failed to install IRQ handler\n");
