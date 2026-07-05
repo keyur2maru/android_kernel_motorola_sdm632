@@ -582,6 +582,8 @@ struct msm_kms *mdp4_kms_init(struct drm_device *dev)
 		aspace = NULL;
 	}
 
+	kms->aspace = aspace;
+
 	ret = modeset_init(mdp4_kms);
 	if (ret) {
 		dev_err(dev->dev, "modeset_init failed: %d\n", ret);

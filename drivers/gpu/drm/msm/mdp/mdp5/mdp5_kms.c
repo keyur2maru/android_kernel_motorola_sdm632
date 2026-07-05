@@ -640,6 +640,8 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 		aspace = NULL;
 	}
 
+	kms->aspace = aspace;
+
 	ret = modeset_init(mdp5_kms);
 	if (ret) {
 		dev_err(&pdev->dev, "modeset_init failed: %d\n", ret);
