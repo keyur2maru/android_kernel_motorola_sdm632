@@ -1529,6 +1529,7 @@ static int rcg_clk_set_parent(struct clk *clk, struct clk *parent_clk)
 	unsigned int parent_rate, rate;
 	u32 m_val, n_val, d_val, div_val;
 	u32 cfg_regval;
+	bool dynamic_switch;
 
 	/* Find the source clock freq tbl for the requested parent */
 	if (!rcg->freq_tbl)
@@ -1539,11 +1540,22 @@ static int rcg_clk_set_parent(struct clk *clk, struct clk *parent_clk)
 			return -ENXIO;
 	}
 
-	/* This implementation recommends that the RCG be unprepared
-	 * when switching RCG source since the divider configuration
-	 * remains unchanged.
+	/*
+	 * The MDSS DSI byte/pixel RCGs are glitch-free source muxes. The
+	 * bootloader leaves them prepared and enabled to keep the boot splash
+	 * lit, so by the time the DSI host reparents them onto the mdss-pll
+	 * they are already prepared. These muxes support a dynamic source
+	 * switch via the CONFIG_UPDATE handshake, force-enabled so the CBCR
+	 * feedback cannot gate the RCG root mid-switch - the same method
+	 * rcg_clk_set_rate() and rcg_clk_enable() use to switch a running RCG.
+	 * Skip the "recommend unprepared" WARN for them; other RCGs where a
+	 * prepared source switch is unsafe keep the warning.
 	 */
-	WARN(clk->prepare_count,
+	dynamic_switch = clk->prepare_count &&
+		(clk->ops == &clk_ops_byte_multiparent ||
+		 clk->ops == &clk_ops_pixel_multiparent);
+
+	WARN(clk->prepare_count && !dynamic_switch,
 		"Trying to switch RCG source while it is prepared!\n");
 
 	parent_rate = clk_get_rate(parent_clk);
@@ -1591,8 +1603,16 @@ static int rcg_clk_set_parent(struct clk *clk, struct clk *parent_clk)
 	if (rc)
 		return rc;
 
-	/* Switch RCG source */
+	/*
+	 * Switch RCG source. For a prepared glitch-free mux force the RCG root
+	 * on across the CFG_RCGR update so the downstream branch's CBCR
+	 * feedback cannot turn the root off mid-switch, then hand control back.
+	 */
+	if (dynamic_switch)
+		rcg_set_force_enable(rcg);
 	rcg->set_rate(rcg, nf);
+	if (dynamic_switch)
+		rcg_clear_force_enable(rcg);
 
 	rcg->current_freq = nf;
 	clk->parent = parent_clk;
