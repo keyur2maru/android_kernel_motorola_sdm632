@@ -333,5 +333,12 @@ TRACE_EVENT(sde_rot_evtlog,
 	*		defined(TRACE_HEADER_MULTI_READ)
 	*/
 
+/*
+ * rot_entry_template takes 18 arguments, more than the 12 a BPF raw tracepoint
+ * can carry. Skip BPF raw tracepoint generation for this header; the ftrace and
+ * perf tracepoints are unaffected.
+ */
+#define TRACE_SKIP_BPF_PROBE
+
 /* This part must be outside protection */
 #include <trace/define_trace.h>
