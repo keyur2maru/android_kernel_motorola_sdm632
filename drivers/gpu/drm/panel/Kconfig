@@ -81,4 +81,14 @@ config DRM_PANEL_SHARP_LS043T1LE01
 	  Say Y here if you want to enable support for Sharp LS043T1LE01 qHD
 	  (540x960) DSI panel as found on the Qualcomm APQ8074 Dragonboard
 
+config DRM_PANEL_MOT_DJN_569
+	tristate "Motorola DJN 569 720x1512 video mode panel"
+	depends on OF
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here if you want to enable support for the Motorola DJN 569
+	  720x1512 video mode DSI panel as found on the Moto G7 Play (channel,
+	  SDM632/msm8953).
+
 endmenu
