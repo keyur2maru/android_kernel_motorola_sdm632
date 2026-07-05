@@ -608,42 +608,34 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	mdelay(16);
 
 	if (config->platform.iommu) {
-		struct msm_mmu *mmu = msm_iommu_new(&pdev->dev,
-				config->platform.iommu);
-		if (IS_ERR(mmu)) {
-			ret = PTR_ERR(mmu);
+		/*
+		 * Use the mainline msm_iommu address space (msm_iommu_aspace_ops:
+		 * drm_mm iova allocation + msm_iommu_map), NOT the SDE
+		 * msm_gem_smmu_address_space_create().  The SDE smmu_aspace_map_vma
+		 * op calls aspace->mmu->funcs->map_sg(), which msm_iommu_new()'s mmu
+		 * does not implement (only ->map), so mapping the DSI TX buffer did
+		 * "blr NULL" -> PC=0 oops (and never allocated an iova, hence the
+		 * spurious SMMU faults).  msm_gem_address_space_create() builds the
+		 * msm_iommu mmu internally and installs the matching ops.
+		 */
+		aspace = msm_gem_address_space_create(&pdev->dev,
+				config->platform.iommu, "mdp5");
+		if (IS_ERR(aspace)) {
+			ret = PTR_ERR(aspace);
 			dev_err(&pdev->dev, "failed to init iommu: %d\n", ret);
 			iommu_domain_free(config->platform.iommu);
 			goto fail;
 		}
 
-		aspace = msm_gem_smmu_address_space_create(dev,
-				mmu, "mdp5");
-		if (IS_ERR(aspace)) {
-			ret = PTR_ERR(aspace);
-			goto fail;
-		}
-
 		mdp5_kms->aspace = aspace;
 
-		ret = mmu->funcs->attach(aspace->mmu, iommu_ports,
+		ret = aspace->mmu->funcs->attach(aspace->mmu, iommu_ports,
 				ARRAY_SIZE(iommu_ports));
 		if (ret) {
 			dev_err(&pdev->dev, "failed to attach iommu: %d\n",
 				ret);
-			mmu->funcs->destroy(mmu);
 			goto fail;
 		}
-
-		/*
-		 * smmu_aspace_map_vma() gates on aspace->domain_attached, which
-		 * (unlike the msm_smmu_client flag set during attach) is only
-		 * raised by the SDE KMS path.  The MDP5 revival attaches the
-		 * mmu but never set it, so every msm_gem_get_iova() on this
-		 * aspace returned -EINVAL (dsi_tx_buf_alloc "failed to get
-		 * iova, -22").  Mirror sde_kms.c after a successful attach.
-		 */
-		aspace->domain_attached = true;
 	} else {
 		dev_info(&pdev->dev,
 			 "no iommu, fallback to phys contig buffers for scanout\n");
