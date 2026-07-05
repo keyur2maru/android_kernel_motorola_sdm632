@@ -1,5 +1,15 @@
 ccflags-y += -I$(src)
 
+# The MDSS DSI PLL clock driver (drivers/clk/msm/mdss, CONFIG_MSM_MDSS_PLL)
+# links against the msm_mdss_* vreg/clk helpers implemented in mdss_io_util.c.
+# When the full fbdev MDSS stack is disabled (drm/msm owns display) that file
+# is not otherwise built, so provide it standalone. mdss_io_util.c is self
+# contained (no tracepoint, no other fbdev deps). Guarded so it is not built
+# twice when FB_MSM_MDSS is also enabled (it is part of mdss-mdp-objs there).
+ifneq ($(CONFIG_FB_MSM_MDSS),y)
+obj-$(CONFIG_MSM_MDSS_PLL) += mdss_io_util.o
+endif
+
 obj-$(CONFIG_FB_MSM_MDSS_MHL3) += mhl3/
 obj-$(CONFIG_MSM_DBA) += msm_dba/
 
@@ -81,6 +91,11 @@ obj-$(CONFIG_FB_MSM_QPIC) += mdss-qpic.o
 obj-$(CONFIG_FB_MSM_QPIC_ILI_QVGA_PANEL) += qpic_panel_ili_qvga.o
 
 obj-$(CONFIG_FB_MSM_MDSS) += mdss_fb.o mdss_util.o
+# compat ioctl shims for mdss_fb; only meaningful with the fbdev MDSS stack.
+# Gate on FB_MSM_MDSS so a standalone msm/ descent (CONFIG_MSM_MDSS_PLL with
+# FB_MSM off) does not pull in references to the un-built mdss_fb_* symbols.
+ifeq ($(CONFIG_FB_MSM_MDSS),y)
 obj-$(CONFIG_COMPAT) += mdss_compat_utils.o
+endif
 
 obj-$(CONFIG_FB_MSM_MDSS) += mdss_livedisplay.o

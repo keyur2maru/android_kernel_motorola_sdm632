@@ -134,6 +134,10 @@ ifeq ($(CONFIG_FB_MSM),y)
 obj-y                             += msm/
 else
 obj-$(CONFIG_MSM_DBA)             += msm/msm_dba/
+# Descend into msm/ for the standalone mdss_io_util.o that the MDSS DSI PLL
+# clock driver (CONFIG_MSM_MDSS_PLL) links against, even when the fbdev MDSS
+# stack (CONFIG_FB_MSM) is disabled and drm/msm owns display.
+obj-$(CONFIG_MSM_MDSS_PLL)        += msm/
 endif
 obj-$(CONFIG_PANEL_NOTIFICATIONS) += panel_notifier.o
 
