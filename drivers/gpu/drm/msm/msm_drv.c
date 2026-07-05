@@ -2034,6 +2034,7 @@ static int __init msm_drm_register(void)
 {
 	DBG("init");
 	msm_smmu_driver_init();
+	msm_mdp_register();
 	msm_dsi_register();
 	msm_edp_register();
 	msm_hdmi_register();
@@ -2049,6 +2050,7 @@ static void __exit msm_drm_unregister(void)
 	adreno_unregister();
 	msm_edp_unregister();
 	msm_dsi_unregister();
+	msm_mdp_unregister();
 	msm_smmu_driver_cleanup();
 }
 
