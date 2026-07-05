@@ -160,5 +160,13 @@ TRACE_EVENT(msm_cam_isp_status_dump,
 );
 
 #endif /* _MSM_CAM_TRACE_H */
+
+/*
+ * These events pass a large struct (struct msm_vfe_irq_debug_info) by value,
+ * which cannot be expressed as a BPF raw tracepoint. Skip BPF raw tracepoint
+ * generation for this header; the ftrace and perf tracepoints are unaffected.
+ */
+#define TRACE_SKIP_BPF_PROBE
+
 /* This part must be outside protection */
 #include <trace/define_trace.h>
