@@ -121,6 +121,7 @@
 					reg = <1>;
 					dsi0_drm_out: endpoint {
 						remote-endpoint = <&djn569_panel_in>;
+						data-lanes = <0 1 2 3>;
 					};
 				};
 			};
