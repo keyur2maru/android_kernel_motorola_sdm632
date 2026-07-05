@@ -120,6 +120,25 @@
 				port@1 {
 					reg = <1>;
 					dsi0_drm_out: endpoint {
+						remote-endpoint = <&djn569_panel_in>;
+					};
+				};
+			};
+
+			panel@0 {
+				compatible = "mot,djn-569-hd-vid";
+				reg = <0>;
+
+				/* reset: tlmm gpio61, active low */
+				reset-gpios = <&tlmm 61 1>;
+				/* backlight enable: pm8953 gpio4 */
+				bklt-en-gpios = <&pm8953_gpios 4 0>;
+				/* high brightness mode enable: tlmm gpio28 */
+				hbm-en-gpios = <&tlmm 28 0>;
+
+				port {
+					djn569_panel_in: endpoint {
+						remote-endpoint = <&dsi0_drm_out>;
 					};
 				};
 			};
