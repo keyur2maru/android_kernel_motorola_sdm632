@@ -345,6 +345,10 @@ static int get_mdp_ver(struct platform_device *pdev)
 		.data	= (void	*)KMS_MDP5,
 	},
 	{
+		.compatible = "qcom,mdss",
+		.data	= (void	*)KMS_MDP5,
+	},
+	{
 		.compatible = "qcom,sde-kms",
 		.data	= (void	*)KMS_SDE,
 	},
@@ -1760,7 +1764,7 @@ static int add_components_mdp(struct device *mdp_dev,
 
 static int compare_name_mdp(struct device *dev, void *data)
 {
-	return (strnstr(dev_name(dev), "mdp", strlen("mdp")) != NULL);
+	return (strstr(dev_name(dev), "mdp") != NULL);
 }
 
 static int add_display_components(struct device *dev,
