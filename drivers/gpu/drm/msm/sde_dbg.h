@@ -340,7 +340,13 @@ int sde_evtlog_get_filter(struct sde_dbg_evtlog *evtlog, int index,
  * sde_rsc_debug_dump - sde rsc debug dump status
  * @mux_sel:	select mux on rsc debug bus
  */
+#if defined(CONFIG_DRM_SDE_RSC)
 void sde_rsc_debug_dump(u32 mux_sel);
+#else
+static inline void sde_rsc_debug_dump(u32 mux_sel)
+{
+}
+#endif
 
 /**
  * dsi_ctrl_debug_dump - dump dsi debug dump status
