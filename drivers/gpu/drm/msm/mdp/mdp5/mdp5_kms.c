@@ -634,6 +634,16 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 			mmu->funcs->destroy(mmu);
 			goto fail;
 		}
+
+		/*
+		 * smmu_aspace_map_vma() gates on aspace->domain_attached, which
+		 * (unlike the msm_smmu_client flag set during attach) is only
+		 * raised by the SDE KMS path.  The MDP5 revival attaches the
+		 * mmu but never set it, so every msm_gem_get_iova() on this
+		 * aspace returned -EINVAL (dsi_tx_buf_alloc "failed to get
+		 * iova, -22").  Mirror sde_kms.c after a successful attach.
+		 */
+		aspace->domain_attached = true;
 	} else {
 		dev_info(&pdev->dev,
 			 "no iommu, fallback to phys contig buffers for scanout\n");
