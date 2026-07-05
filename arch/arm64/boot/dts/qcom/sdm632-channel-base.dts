@@ -14,6 +14,11 @@
 
 #include "sdm632-moto-base.dtsi"
 
+/* drm/msm MDP5 KMS wrapper node (qcom,mdss). Kept separate from the shared
+ * msm8953-mdss.dtsi fbdev binding; the fbdev path is compiled out so only
+ * this node binds. See msm8953-mdss-drm.dtsi. */
+#include "msm8953-mdss-drm.dtsi"
+
 &mdss_dsi0 {
 	/delete-property/ vdd-supply;
 };
