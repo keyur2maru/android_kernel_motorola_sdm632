@@ -63,13 +63,20 @@ static void sync_for_device(struct msm_gem_object *msm_obj)
 {
 	struct device *dev = msm_obj->base.dev->dev;
 
-	if (get_dma_ops(dev) && IS_ENABLED(CONFIG_ARM64)) {
-		dma_sync_sg_for_device(dev, msm_obj->sgt->sgl,
-			msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
-	} else {
-		dma_map_sg(dev, msm_obj->sgt->sgl,
-			msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
-	}
+	/*
+	 * The dma_sync_sg_for_device() fast path relies on get_dma_ops(dev)
+	 * being NULL for dma-direct devices, which is how mainline (>=4.19)
+	 * distinguishes them from iommu-backed devices.  On this tree the
+	 * arm64 dma layer always installs a non-NULL ops struct (swiotlb),
+	 * so a dma-direct display device (mdp5, iommu wired to the mdp
+	 * sub-node) would wrongly take the sync path.  There the swiotlb sync
+	 * dereferences sg->dma_address, which sg_alloc_table_from_pages()
+	 * leaves unset until dma_map_sg() runs, faulting in the dcache clean.
+	 * dma_map_sg() populates dma_address and performs the same cache
+	 * maintenance, so use it unconditionally.
+	 */
+	dma_map_sg(dev, msm_obj->sgt->sgl,
+		msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
 }
 
 /* allocate pages from VRAM carveout, used when no IOMMU: */
@@ -154,6 +161,10 @@ static void put_pages(struct drm_gem_object *obj)
 
 	if (msm_obj->pages) {
 		if (msm_obj->sgt) {
+			/* Balance the dma_map_sg() done in sync_for_device(). */
+			if (msm_obj->flags & (MSM_BO_WC|MSM_BO_UNCACHED))
+				dma_unmap_sg(obj->dev->dev, msm_obj->sgt->sgl,
+					msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
 			sg_free_table(msm_obj->sgt);
 			kfree(msm_obj->sgt);
 		}
