@@ -78,12 +78,12 @@ static void mdp5_plane_install_rotation_property(struct drm_device *dev,
 	if (!dev->mode_config.rotation_property)
 		dev->mode_config.rotation_property =
 			drm_mode_create_rotation_property(dev,
-				DRM_ROTATE_0 | DRM_REFLECT_X | DRM_REFLECT_Y);
+				DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y);
 
 	if (dev->mode_config.rotation_property)
 		drm_object_attach_property(&plane->base,
 			dev->mode_config.rotation_property,
-			DRM_ROTATE_0);
+			DRM_MODE_ROTATE_0);
 }
 
 /* helper to install properties which are common to planes and crtcs */
@@ -311,8 +311,8 @@ static int mdp5_plane_atomic_check(struct drm_plane *plane,
 			return -EINVAL;
 		}
 
-		hflip = !!(state->rotation & DRM_REFLECT_X);
-		vflip = !!(state->rotation & DRM_REFLECT_Y);
+		hflip = !!(state->rotation & DRM_MODE_REFLECT_X);
+		vflip = !!(state->rotation & DRM_MODE_REFLECT_Y);
 		if ((vflip && !(mdp5_plane->caps & MDP_PIPE_CAP_VFLIP)) ||
 			(hflip && !(mdp5_plane->caps & MDP_PIPE_CAP_HFLIP))) {
 			DBG("Pipe doesn't support flip\n");
@@ -744,8 +744,8 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 	config |= get_scale_config(format, src_h, crtc_h, false);
 	DBG("scale config = %x", config);
 
-	hflip = !!(pstate->rotation & DRM_REFLECT_X);
-	vflip = !!(pstate->rotation & DRM_REFLECT_Y);
+	hflip = !!(pstate->rotation & DRM_MODE_REFLECT_X);
+	vflip = !!(pstate->rotation & DRM_MODE_REFLECT_Y);
 
 	spin_lock_irqsave(&mdp5_plane->pipe_lock, flags);
 
