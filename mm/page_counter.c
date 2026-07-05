@@ -12,6 +12,32 @@
 #include <linux/bug.h>
 #include <asm/page.h>
 
+static void propagate_protected_usage(struct page_counter *c,
+				      unsigned long usage)
+{
+	unsigned long protected, old_protected;
+	long delta;
+
+	if (!c->parent)
+		return;
+
+	if (c->min || atomic_long_read(&c->min_usage)) {
+		protected = min(usage, c->min);
+		old_protected = atomic_long_xchg(&c->min_usage, protected);
+		delta = protected - old_protected;
+		if (delta)
+			atomic_long_add(delta, &c->parent->children_min_usage);
+	}
+
+	if (c->low || atomic_long_read(&c->low_usage)) {
+		protected = min(usage, c->low);
+		old_protected = atomic_long_xchg(&c->low_usage, protected);
+		delta = protected - old_protected;
+		if (delta)
+			atomic_long_add(delta, &c->parent->children_low_usage);
+	}
+}
+
 /**
  * page_counter_cancel - take pages out of the local counter
  * @counter: counter
@@ -22,6 +48,7 @@ void page_counter_cancel(struct page_counter *counter, unsigned long nr_pages)
 	long new;
 
 	new = atomic_long_sub_return(nr_pages, &counter->count);
+	propagate_protected_usage(counter, new);
 	/* More uncharges than charges? */
 	WARN_ON_ONCE(new < 0);
 }
@@ -41,6 +68,7 @@ void page_counter_charge(struct page_counter *counter, unsigned long nr_pages)
 		long new;
 
 		new = atomic_long_add_return(nr_pages, &c->count);
+		propagate_protected_usage(c, new);
 		/*
 		 * This is indeed racy, but we can live with some
 		 * inaccuracy in the watermark.
@@ -84,6 +112,7 @@ bool page_counter_try_charge(struct page_counter *counter,
 		new = atomic_long_add_return(nr_pages, &c->count);
 		if (new > c->limit) {
 			atomic_long_sub(nr_pages, &c->count);
+			propagate_protected_usage(c, new);
 			/*
 			 * This is racy, but we can live with some
 			 * inaccuracy in the failcnt.
@@ -92,6 +121,7 @@ bool page_counter_try_charge(struct page_counter *counter,
 			*fail = c;
 			goto failed;
 		}
+		propagate_protected_usage(c, new);
 		/*
 		 * Just like with failcnt, we can live with some
 		 * inaccuracy in the watermark.
@@ -119,6 +149,40 @@ void page_counter_uncharge(struct page_counter *counter, unsigned long nr_pages)
 
 	for (c = counter; c; c = c->parent)
 		page_counter_cancel(c, nr_pages);
+}
+
+/**
+ * page_counter_set_min - set the amount of protected memory
+ * @counter: counter
+ * @nr_pages: value to set
+ *
+ * The caller must serialize invocations on the same counter.
+ */
+void page_counter_set_min(struct page_counter *counter, unsigned long nr_pages)
+{
+	struct page_counter *c;
+
+	counter->min = nr_pages;
+
+	for (c = counter; c; c = c->parent)
+		propagate_protected_usage(c, atomic_long_read(&c->count));
+}
+
+/**
+ * page_counter_set_low - set the amount of protected memory
+ * @counter: counter
+ * @nr_pages: value to set
+ *
+ * The caller must serialize invocations on the same counter.
+ */
+void page_counter_set_low(struct page_counter *counter, unsigned long nr_pages)
+{
+	struct page_counter *c;
+
+	counter->low = nr_pages;
+
+	for (c = counter; c; c = c->parent)
+		propagate_protected_usage(c, atomic_long_read(&c->count));
 }
 
 /**
