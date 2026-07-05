@@ -1677,6 +1677,8 @@ static int cgroup_show_options(struct seq_file *seq,
 		seq_puts(seq, ",xattr");
 	if (root->flags & CGRP_ROOT_CPUSET_V2_MODE)
 		seq_puts(seq, ",cpuset_v2_mode");
+	if (root->flags & CGRP_ROOT_MEMORY_RECURSIVE_PROT)
+		seq_puts(seq, ",memory_recursiveprot");
 
 	spin_lock(&release_agent_path_lock);
 	if (strlen(root->release_agent_path))
@@ -2136,20 +2138,22 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 			char *token, *o = data;
 
 			/*
-			 * channel A17 bring-up: Android 17 libprocessgroup mounts
-			 * the cgroup2 memory controller with the "memory_recursiveprot"
-			 * option (upstream 8a931f801340, "mm: memcontrol: recursive
-			 * memory.low protection", v5.7). This 4.9 cgroup core does not
-			 * implement recursive memory.low protection, so accept and
-			 * ignore only that one option; the real memory_recursiveprot
-			 * backport is tracked as a separate follow-up. Every other
-			 * unknown cgroup2 option is still rejected with -EINVAL.
+			 * Android 17 libprocessgroup mounts the cgroup2 memory
+			 * controller with the "memory_recursiveprot" option
+			 * (upstream 8a931f801340, "mm: memcontrol: recursive
+			 * memory.low protection", v5.7), which enables recursive
+			 * subtree protection. Parse it and set the corresponding
+			 * default-hierarchy flag. Every other unknown cgroup2
+			 * option is still rejected with -EINVAL.
 			 */
 			while ((token = strsep(&o, ",")) != NULL) {
 				if (!*token)
 					continue;
-				if (!strcmp(token, "memory_recursiveprot"))
+				if (!strcmp(token, "memory_recursiveprot")) {
+					cgrp_dfl_root.flags |=
+						CGRP_ROOT_MEMORY_RECURSIVE_PROT;
 					continue;
+				}
 				pr_err("cgroup2: unknown option \"%s\"\n", token);
 				put_cgroup_ns(ns);
 				return ERR_PTR(-EINVAL);
