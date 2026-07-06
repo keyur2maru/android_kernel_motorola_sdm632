@@ -5890,6 +5890,28 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 		       readl_relaxed(cbn + ARM_SMMU_CB_TTBR0));
 	}
 
+	/* The implementation-defined region between the global space and
+	 * the context banks holds the per-master TBU pages on this SMMU
+	 * generation (the kgsl SMMU programs its own at +0x6000 via
+	 * attach-impl-defs).  MICRO_MMU_CTRL at +0x0 of each page carries
+	 * the halt/idle state of the unit.  Probe the first words of every
+	 * page so the stuck TBU is visible in a working-vs-hung diff.
+	 */
+	{
+		unsigned long off;
+
+		for (off = 0x2000; off < 0x20000; off += 0x1000) {
+			u32 w0 = readl_relaxed(ARM_SMMU_GR0(smmu) + off);
+			u32 w1 = readl_relaxed(ARM_SMMU_GR0(smmu) + off + 0x8);
+			u32 w2 = readl_relaxed(ARM_SMMU_GR0(smmu) + off + 0x274);
+			u32 w3 = readl_relaxed(ARM_SMMU_GR0(smmu) + off + 0x670);
+
+			if (w0 || w1 || w2 || w3)
+				pr_err("VG: tbu +0x%05lx: %08x %08x %08x %08x\n",
+				       off, w0, w1, w2, w3);
+		}
+	}
+
 	/* The qsmmuv500 TCU implementation-defined page (dt "tcu-base"),
 	 * readable here because the SMMU power/clocks are held.
 	 */
