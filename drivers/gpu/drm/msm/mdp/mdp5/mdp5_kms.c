@@ -610,6 +610,20 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 
 	if (config->platform.iommu) {
 		int stall_disable = 1;
+		int upstream_hint = 1;
+
+		/* Route pagetable walks and translated client transactions
+		 * with the qcom upstream-hint attributes, as the downstream
+		 * display client does for every display domain
+		 * (msm_smmu.c "couldn't enable mdp pagetable walks").
+		 * Without it the default PTE attributes send the MDSS
+		 * masters' translated reads out shareable, and they stall
+		 * in the interconnect: every command fetch and scanout read
+		 * hangs while walks and fault reporting still work.
+		 */
+		iommu_domain_set_attr(config->platform.iommu,
+				      DOMAIN_ATTR_USE_UPSTREAM_HINT,
+				      &upstream_hint);
 
 		/* Terminate faulted transactions instead of stalling them:
 		 * a stalled fault whose context interrupt is never serviced
