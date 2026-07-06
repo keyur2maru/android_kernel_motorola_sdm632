@@ -258,32 +258,6 @@ static int djn_569_prepare(struct drm_panel *panel)
 	}
 	usleep_range(10000, 11000);
 
-	/*
-	 * The bootloader hands the panel over initialized, displaying and
-	 * lit, and the supplies are held from probe so that state survives
-	 * to this point.  Ask the panel before touching it: if it reports
-	 * sleep-out and display-on, adopt it as-is instead of resetting and
-	 * re-initializing (the downstream splash path also never
-	 * reinitializes a live panel).  The readback doubles as a link
-	 * check against a known-alive peripheral.
-	 */
-	{
-		u8 power_mode = 0;
-
-		ret = mipi_dsi_set_maximum_return_packet_size(ctx->dsi, 1);
-		if (!ret)
-			ret = mipi_dsi_dcs_read(ctx->dsi,
-						MIPI_DCS_GET_POWER_MODE,
-						&power_mode, 1);
-		dev_info(panel->dev, "pre-init power mode: ret=%d val=0x%02x\n",
-			 ret, power_mode);
-
-		if ((power_mode & 0x14) == 0x14) {
-			dev_info(panel->dev, "adopting live panel\n");
-			goto adopted;
-		}
-	}
-
 	djn_569_reset(ctx);
 
 	ret = djn_569_on(ctx);
@@ -293,27 +267,6 @@ static int djn_569_prepare(struct drm_panel *panel)
 		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies),
 				       ctx->supplies);
 		return ret;
-	}
-
-adopted:
-
-	/*
-	 * Read the power mode back so the log shows whether the panel
-	 * executed the init sequence (0x9c = sleep-out, display-on,
-	 * normal mode) or ignored it.  Write commands are fire-and-forget
-	 * on this link, so their completion proves nothing about the DDIC.
-	 */
-	{
-		u8 power_mode = 0;
-
-		ret = mipi_dsi_set_maximum_return_packet_size(ctx->dsi, 1);
-		if (!ret)
-			ret = mipi_dsi_dcs_read(ctx->dsi,
-						MIPI_DCS_GET_POWER_MODE,
-						&power_mode, 1);
-		dev_info(panel->dev, "power mode readback: ret=%d val=0x%02x\n",
-			 ret, power_mode);
-		ret = 0;
 	}
 
 	if (ctx->bklt_en_gpio)
