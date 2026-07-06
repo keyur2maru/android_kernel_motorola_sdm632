@@ -1371,6 +1371,16 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				dsi_read(msm_host, REG_DSI_LANE_CTRL),
 				dsi_read(msm_host, REG_DSI_TRIG_CTRL),
 				dma_base, len);
+			{
+				extern void arm_smmu_debug_dump_domain(
+						struct iommu_domain *domain);
+				struct msm_drm_private *p2 =
+					msm_host->dev->dev_private;
+
+				arm_smmu_debug_dump_domain(
+					msm_iommu_get_domain(
+						p2->kms->aspace->mmu));
+			}
 			ret = -ETIMEDOUT;
 		}
 	} else

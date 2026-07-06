@@ -5804,3 +5804,48 @@ static struct platform_driver qsmmuv500_tbu_driver = {
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMU implementations");
 MODULE_AUTHOR("Will Deacon <will.deacon@arm.com>");
 MODULE_LICENSE("GPL v2");
+
+/*
+ * Debug aid for the display bring-up: snapshot the stream mapping and
+ * context bank state of a domain from a driver that observed its master
+ * hang, so the resolution of the transaction is visible at fail time.
+ */
+void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	struct arm_smmu_cfg *cfg = &smmu_domain->cfg;
+	void __iomem *gr0;
+	void __iomem *cb;
+	int i;
+
+	if (!smmu)
+		return;
+	if (arm_smmu_power_on(smmu->pwr))
+		return;
+
+	gr0 = ARM_SMMU_GR0(smmu);
+	cb = ARM_SMMU_CB_BASE(smmu) + ARM_SMMU_CB(smmu, cfg->cbndx);
+
+	pr_err("arm-smmu dump: cbndx=%d gfsr=0x%08x\n", cfg->cbndx,
+	       readl_relaxed(ARM_SMMU_GR0_NS(smmu) + ARM_SMMU_GR0_sGFSR));
+	for (i = 0; i < smmu->num_mapping_groups; i++) {
+		u32 smr = readl_relaxed(gr0 + ARM_SMMU_GR0_SMR(i));
+
+		if (!(smr & SMR_VALID))
+			continue;
+		if ((smr & 0xff00) != 0xc00)
+			continue;
+		pr_err("arm-smmu dump: SMR%d=0x%08x S2CR%d=0x%08x\n", i, smr,
+		       i, readl_relaxed(gr0 + ARM_SMMU_GR0_S2CR(i)));
+	}
+	pr_err("arm-smmu dump: CB sctlr=0x%08x fsr=0x%08x fsynr0=0x%08x far=0x%08x ttbr0=0x%08x\n",
+	       readl_relaxed(cb + ARM_SMMU_CB_SCTLR),
+	       readl_relaxed(cb + ARM_SMMU_CB_FSR),
+	       readl_relaxed(cb + ARM_SMMU_CB_FSYNR0),
+	       readl_relaxed(cb + ARM_SMMU_CB_FAR),
+	       readl_relaxed(cb + ARM_SMMU_CB_TTBR0));
+
+	arm_smmu_power_off(smmu->pwr);
+}
+EXPORT_SYMBOL(arm_smmu_debug_dump_domain);
