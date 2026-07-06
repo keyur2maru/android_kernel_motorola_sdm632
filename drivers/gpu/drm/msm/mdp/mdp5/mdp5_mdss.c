@@ -51,17 +51,45 @@ static irqreturn_t mdss_irq(int irq, void *arg)
 {
 	struct msm_mdss *mdss = arg;
 	u32 intr;
+	int i;
 
-	intr = mdss_read(mdss, REG_MDSS_HW_INTR_STATUS);
+	/*
+	 * On msm8953/channel the MDSS summary interrupt reaches the CPU as an
+	 * edge (the mdss line is routed through mpm-gic), not a level. A
+	 * sub-block interrupt (MDP vblank, DSI command-DMA-done) that asserts
+	 * while we are still dispatching an earlier one therefore produces no
+	 * fresh parent edge, so its status bit would be latched here with the
+	 * demux handler never re-entered - the summary line stays high and all
+	 * further sub-block interrupts are blocked. Re-read the summary status
+	 * and keep dispatching until it drains to zero so a concurrently
+	 * asserted source is not lost. Bound the passes so a source with no
+	 * registered handler cannot spin the CPU.
+	 */
+	for (i = 0; i < 8; i++) {
+		intr = mdss_read(mdss, REG_MDSS_HW_INTR_STATUS);
 
-	VERB("intr=%08x", intr);
+		VERB("intr=%08x", intr);
 
-	while (intr) {
-		irq_hw_number_t hwirq = fls(intr) - 1;
+		if (!intr)
+			break;
 
-		generic_handle_irq(irq_find_mapping(
-				mdss->irqcontroller.domain, hwirq));
-		intr &= ~(1 << hwirq);
+		/*
+		 * intr still set on a re-read means a sub-block asserted while
+		 * we were dispatching the previous pass - the case that an edge
+		 * parent would otherwise drop. Record it (rate-limited) so the
+		 * fix can be confirmed from the device log.
+		 */
+		if (i)
+			pr_info_ratelimited("mdss_irq: drained coalesced intr=%08x on pass %d\n",
+					    intr, i);
+
+		while (intr) {
+			irq_hw_number_t hwirq = fls(intr) - 1;
+
+			generic_handle_irq(irq_find_mapping(
+					mdss->irqcontroller.domain, hwirq));
+			intr &= ~(1 << hwirq);
+		}
 	}
 
 	return IRQ_HANDLED;
