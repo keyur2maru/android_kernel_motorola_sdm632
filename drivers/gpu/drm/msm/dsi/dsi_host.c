@@ -2415,6 +2415,49 @@ static void msm_dsi_sfpb_config(struct msm_dsi_host *msm_host, bool enable)
 			SFPB_GPREG_MASTER_PORT_EN(en));
 }
 
+/*
+ * Wait for the DSI data lanes to settle into the LP-11 stop state before the
+ * first DCS command is issued.  The 14nm PHY powers the lanes up at the end of
+ * dsi_14nm_phy_enable (CMN_CTRL_0), but the lanes need a short analog ramp to
+ * reach a stable stop state, and the controller soft reset just above pulses
+ * the block again.  The bootloader lights a splash on this DSI panel and hands
+ * the PHY over mid-transition, so on a dirty handoff the lanes are still
+ * settling when power_on returns.  Issuing the first LP command before the
+ * lanes have reached stop races the PHY LP-escape state machine: the command
+ * DMA is triggered (STATUS0 CMD_MODE_DMA_BUSY) but the data lanes never leave
+ * stop to perform the escape, so the transfer hangs to the 200ms timeout and
+ * panel init fails with -110.  On a clean handoff (a rare boot) the lanes are
+ * already settled by the time the first command runs, which is why the failure
+ * is boot-to-boot intermittent for the same LP config.
+ *
+ * Poll the lane stop-state (the low bits of the LANE_STATUS register, which
+ * sits one register below LANE_CTRL in this DSI6G block) until every active
+ * data lane is stopped, mirroring the downstream wait_for_lane_idle
+ * (dsi_ctrl_hw_14_wait_for_lane_idle polls DSI_LANE_STATUS for the
+ * stop_state_mask before it touches the lanes).  A short unconditional settle
+ * also covers the PHY analog ramp for the case where the register already
+ * reads stopped but the LP-escape logic has not stabilised.
+ */
+static void dsi_wait_for_lanes_ready(struct msm_dsi_host *msm_host)
+{
+	u32 stop_mask = (1 << msm_host->lanes) - 1;
+	u32 lane_status = 0;
+	int i;
+
+	/* let the PHY analog and LP-escape logic settle after lane power-up */
+	udelay(200);
+
+	for (i = 0; i < 20; i++) {
+		lane_status = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
+		if ((lane_status & stop_mask) == stop_mask)
+			return;
+		udelay(100);
+	}
+
+	pr_warn("%s: DSI%d data lanes not in stop state before init, lane_status=0x%x\n",
+		__func__, msm_host->id, lane_status);
+}
+
 int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 			struct msm_dsi_phy_shared_timings *phy_shared_timings)
 {
@@ -2482,6 +2525,13 @@ int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 	 * starts the first command from a clean, PHY-synced engine state.
 	 */
 	dsi_sw_reset_restore(msm_host);
+
+	/*
+	 * Give the freshly-enabled PHY data lanes time to reach a stable LP-11
+	 * stop state before drm_panel_prepare() issues the first init command,
+	 * so the LP escape does not race the PHY on a dirty splash handoff.
+	 */
+	dsi_wait_for_lanes_ready(msm_host);
 
 	if (msm_host->disp_en_gpio)
 		gpiod_set_value(msm_host->disp_en_gpio, 1);
