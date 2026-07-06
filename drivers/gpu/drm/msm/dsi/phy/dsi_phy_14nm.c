@@ -53,6 +53,34 @@ static void dsi_14nm_dphy_set_timing(struct msm_dsi_phy *phy,
 		      DSI_14nm_PHY_LN_TIMING_CTRL_11_TRIG3_CMD(0xa0));
 }
 
+/*
+ * One-shot dump of the PHY common and lane blocks exactly as the
+ * bootloader left them, before this driver reprograms the PHY: the
+ * bootloader lights this panel every boot, so its surviving lane and
+ * timing configuration is the reference to diff against.
+ */
+static void dsi_14nm_dump_boot_state(struct msm_dsi_phy *phy)
+{
+	static bool dumped;
+	int i;
+
+	if (dumped)
+		return;
+	dumped = true;
+
+	for (i = 0; i < 0x60; i += 16)
+		pr_info("dsi_phy_boot_state: cmn %02x: %08x %08x %08x %08x\n",
+			i,
+			readl(phy->base + i), readl(phy->base + i + 4),
+			readl(phy->base + i + 8), readl(phy->base + i + 12));
+	for (i = 0; i < 0x280; i += 16)
+		pr_info("dsi_phy_boot_state: ln %03x: %08x %08x %08x %08x\n",
+			i,
+			readl(phy->lane_base + i), readl(phy->lane_base + i + 4),
+			readl(phy->lane_base + i + 8),
+			readl(phy->lane_base + i + 12));
+}
+
 static int dsi_14nm_phy_enable(struct msm_dsi_phy *phy, int src_pll_id,
 			       struct msm_dsi_phy_clk_request *clk_req)
 {
@@ -68,6 +96,8 @@ static int dsi_14nm_phy_enable(struct msm_dsi_phy *phy, int src_pll_id,
 			"%s: D-PHY timing calculation failed\n", __func__);
 		return -EINVAL;
 	}
+
+	dsi_14nm_dump_boot_state(phy);
 
 	data = 0x1c;
 	if (phy->usecase != MSM_DSI_PHY_STANDALONE)

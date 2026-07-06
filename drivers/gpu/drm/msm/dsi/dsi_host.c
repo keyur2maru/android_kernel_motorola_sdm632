@@ -2204,6 +2204,18 @@ int msm_dsi_host_cmd_rx(struct mipi_dsi_host *host,
 		 */
 		dlen = dsi_cmd_dma_rx(msm_host, buf, rx_byte, pkt_size);
 
+		/*
+		 * Distinguish a real response from an empty readback fifo:
+		 * a peripheral that never answered the BTA leaves RDBK_DATA0
+		 * as cleared and latches BTA timeout in TIMEOUT_STATUS.
+		 */
+		pr_info("%s: rdbk0=0x%08x rdbk_ctrl=0x%08x ack_err=0x%08x timeout=0x%08x\n",
+			__func__,
+			dsi_read(msm_host, REG_DSI_RDBK_DATA(0)),
+			dsi_read(msm_host, REG_DSI_RDBK_DATA_CTRL),
+			dsi_read(msm_host, REG_DSI_ACK_ERR_STATUS),
+			dsi_read(msm_host, REG_DSI_TIMEOUT_STATUS));
+
 		if (dlen <= 0)
 			return 0;
 
@@ -2473,6 +2485,29 @@ static void dsi_wait_for_lanes_ready(struct msm_dsi_host *msm_host)
 		__func__, msm_host->id, lane_status);
 }
 
+/*
+ * One-shot dump of the register block exactly as the bootloader left it,
+ * before this driver writes anything: the bootloader lights this panel
+ * every boot, so its surviving configuration is the reference to diff
+ * the kernel's programming against.
+ */
+static void dsi_dump_boot_state(struct msm_dsi_host *msm_host)
+{
+	static bool dumped;
+	int i;
+
+	if (dumped)
+		return;
+	dumped = true;
+
+	for (i = 0; i < 0x128; i += 16)
+		pr_info("dsi_boot_state: %03x: %08x %08x %08x %08x\n", i,
+			msm_readl(msm_host->ctrl_base + i),
+			msm_readl(msm_host->ctrl_base + i + 4),
+			msm_readl(msm_host->ctrl_base + i + 8),
+			msm_readl(msm_host->ctrl_base + i + 12));
+}
+
 int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 			struct msm_dsi_phy_shared_timings *phy_shared_timings)
 {
@@ -2506,6 +2541,8 @@ int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 			__func__, ret);
 		goto fail_disable_clk;
 	}
+
+	dsi_dump_boot_state(msm_host);
 
 	dsi_timing_setup(msm_host);
 	dsi_sw_reset(msm_host);
