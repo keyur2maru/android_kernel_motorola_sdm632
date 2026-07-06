@@ -671,6 +671,33 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 
 	kms->aspace = aspace;
 
+	/* The VBIF is the AXI master engine for every MDSS fetch.  The
+	 * downstream driver halts its ports before each MDSS power collapse
+	 * and guarantees they are unhalted before any use; nothing in this
+	 * driver did, and a halt inherited from the bootloader or a GDSC
+	 * cycle holds every read (DSI command fetch, scanout) forever with
+	 * no error visible in the DSI controller or the SMMU.
+	 */
+	{
+		void __iomem *vbif = ioremap(0x01ab0000, 0x1040);
+
+		if (vbif) {
+			mdp5_enable(mdp5_kms);
+			dev_info(&pdev->dev,
+				 "vbif clkon=0x%x xin_halt=0x%x/0x%x axi_halt=0x%x/0x%x\n",
+				 readl_relaxed(vbif + 0x4),
+				 readl_relaxed(vbif + 0x200),
+				 readl_relaxed(vbif + 0x204),
+				 readl_relaxed(vbif + 0x208),
+				 readl_relaxed(vbif + 0x20c));
+			writel_relaxed(0, vbif + 0x200);
+			writel_relaxed(0, vbif + 0x208);
+			wmb();
+			mdp5_disable(mdp5_kms);
+			iounmap(vbif);
+		}
+	}
+
 	/* Hold the downstream mdss_mdp MDP->EBI bandwidth vote for the
 	 * whole session: with no vote the NOC releases the MDSS master
 	 * path once the bus driver clears the bootloader's vote, and every
