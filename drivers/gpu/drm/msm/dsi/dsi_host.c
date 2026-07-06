@@ -1306,8 +1306,21 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			 * ctrl (CMD_MODE_EN/ENABLE set?), status0 (engine/DMA
 			 * busy?), intr (DMA_DONE mask+latched status), the error
 			 * latches (fifo/ack_err/dln0_phy) and clk (PLL_UNLOCKED).
+			 *
+			 * dma_ctrl (REG_DSI_CMD_DMA_CTRL): LOW_POWER (0x04000000)
+			 * set means the transfer is LP escape (expected for the
+			 * DJN-569 init sequence), clear means HS.
+			 *
+			 * lane_status: the true per-lane state register.  It sits one
+			 * register below LANE_CTRL in this DSI6G block (offsets are
+			 * shifted by DSI_6G_REG_SHIFT, so ctrl_base+0xa4 here is the
+			 * "DSI_LANE_STATUS" the downstream host polls).  dln{0..3} and
+			 * clklane stopped flags occupy the low bits (clklane bit4,
+			 * 0x10); a set HS/hsdt bit means that lane is in HS.  All
+			 * lanes stopped while the DMA is busy means the lanes never
+			 * entered transmit.
 			 */
-			pr_err("%s: DSI%d dma tx timeout: kicked_off=%d ctrl=0x%x status0=0x%x intr=0x%x fifo=0x%x ack_err=0x%x dln0=0x%x clk=0x%x base=0x%x len=%d\n",
+			pr_err("%s: DSI%d dma tx timeout: kicked_off=%d ctrl=0x%x status0=0x%x intr=0x%x fifo=0x%x ack_err=0x%x dln0=0x%x clk=0x%x dma_ctrl=0x%x lane_status=0x%x base=0x%x len=%d\n",
 				__func__, msm_host->id, dma_kicked_off,
 				dsi_read(msm_host, REG_DSI_CTRL),
 				dsi_read(msm_host, REG_DSI_STATUS0),
@@ -1316,6 +1329,8 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				dsi_read(msm_host, REG_DSI_ACK_ERR_STATUS),
 				dsi_read(msm_host, REG_DSI_DLN0_PHY_ERR),
 				dsi_read(msm_host, REG_DSI_CLK_STATUS),
+				dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL),
+				dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4),
 				dma_base, len);
 			ret = -ETIMEDOUT;
 		}
