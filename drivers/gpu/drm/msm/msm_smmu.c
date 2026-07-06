@@ -538,7 +538,6 @@ static int _msm_smmu_create_mapping(struct msm_smmu_client *client,
 	const struct msm_smmu_domain *domain)
 {
 	int rc;
-	int mdphtw_llc_enable = 1;
 
 	client->mmu_mapping = arm_iommu_create_mapping(&platform_bus_type,
 			domain->va_start, domain->va_size);
@@ -549,13 +548,14 @@ static int _msm_smmu_create_mapping(struct msm_smmu_client *client,
 		return PTR_ERR(client->mmu_mapping);
 	}
 
-	rc = iommu_domain_set_attr(client->mmu_mapping->domain,
-			DOMAIN_ATTR_USE_UPSTREAM_HINT, &mdphtw_llc_enable);
-	if (rc) {
-		dev_err(client->dev, "couldn't enable mdp pagetable walks: %d\n",
-			rc);
-		goto error;
-	}
+	/* DOMAIN_ATTR_USE_UPSTREAM_HINT is deliberately not set: the quirk
+	 * switches the leaf ptes to the implementation-defined qcom memory
+	 * attribute (MAIR attr 0xf4) and a non-shareable walk, and the
+	 * msm8953 MDSS transaction path does not accept the resulting
+	 * output attributes - translated fetches are dropped without a
+	 * fault.  The msm8953 shipping display driver (fbdev mdss_smmu.c)
+	 * never sets this attribute.
+	 */
 
 	if (domain->secure) {
 		int secure_vmid = VMID_CP_PIXEL;
