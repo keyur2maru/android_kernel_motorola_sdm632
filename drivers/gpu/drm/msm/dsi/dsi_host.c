@@ -1088,30 +1088,49 @@ static void dsi_wait4video_eng_busy(struct msm_dsi_host *msm_host)
 static int dsi_tx_buf_alloc(struct msm_dsi_host *msm_host, int size)
 {
 	struct drm_device *dev = msm_host->dev;
+	struct msm_drm_private *priv = dev->dev_private;
+	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
 	int ret;
+	u32 iova;
 
-	/*
-	 * Fetch the command DMA from a physically contiguous coherent
-	 * buffer instead of a gem object mapped through the display SMMU.
-	 * On some boots the SMMU-translated fetch never completes: the
-	 * first LP command latches CMD_MODE_DMA_BUSY with every FIFO empty
-	 * and no error, and from then on every TLBSYNC on the apps SMMU
-	 * times out - the read is stuck in the translation path and wedges
-	 * the display context for the rest of the boot.  The downstream
-	 * host uses a phys-addressed fetch whenever its iommu is not
-	 * attached, and the v2 host here always does; the buffer is a
-	 * single 4K allocation.
-	 */
-	msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
-				&msm_host->tx_buf_paddr, GFP_KERNEL);
-	if (!msm_host->tx_buf) {
-		ret = -ENOMEM;
-		pr_err("%s: failed to allocate tx buf, %d\n",
-			__func__, ret);
-		return ret;
+	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
+		mutex_lock(&dev->struct_mutex);
+		msm_host->tx_gem_obj = msm_gem_new(dev, size, MSM_BO_UNCACHED);
+		if (IS_ERR(msm_host->tx_gem_obj)) {
+			ret = PTR_ERR(msm_host->tx_gem_obj);
+			pr_err("%s: failed to allocate gem, %d\n",
+				__func__, ret);
+			msm_host->tx_gem_obj = NULL;
+			mutex_unlock(&dev->struct_mutex);
+			return ret;
+		}
+
+		ret = msm_gem_get_iova_locked(msm_host->tx_gem_obj,
+				priv->kms->aspace, &iova);
+		mutex_unlock(&dev->struct_mutex);
+		if (ret) {
+			pr_err("%s: failed to get iova, %d\n", __func__, ret);
+			return ret;
+		}
+
+		if (iova & 0x07) {
+			pr_err("%s: buf NOT 8 bytes aligned\n", __func__);
+			return -EINVAL;
+		}
+
+		msm_host->tx_size = msm_host->tx_gem_obj->size;
+	} else {
+		msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
+					&msm_host->tx_buf_paddr, GFP_KERNEL);
+		if (!msm_host->tx_buf) {
+			ret = -ENOMEM;
+			pr_err("%s: failed to allocate tx buf, %d\n",
+				__func__, ret);
+			return ret;
+		}
+
+		msm_host->tx_size = size;
 	}
-
-	msm_host->tx_size = size;
 
 	return 0;
 }
@@ -1139,6 +1158,7 @@ static void dsi_tx_buf_free(struct msm_dsi_host *msm_host)
 static int dsi_cmd_dma_add(struct msm_dsi_host *msm_host,
 			   const struct mipi_dsi_msg *msg)
 {
+	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
 	struct mipi_dsi_packet packet;
 	int len;
 	int ret;
@@ -1156,7 +1176,16 @@ static int dsi_cmd_dma_add(struct msm_dsi_host *msm_host,
 		return -EINVAL;
 	}
 
-	data = msm_host->tx_buf;
+	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
+		data = msm_gem_get_vaddr(msm_host->tx_gem_obj);
+		if (IS_ERR(data)) {
+			ret = PTR_ERR(data);
+			pr_err("%s: get vaddr failed, %d\n", __func__, ret);
+			return ret;
+		}
+	} else {
+		data = msm_host->tx_buf;
+	}
 
 	/* MSM specific command format in memory */
 	data[0] = packet.header[1];
@@ -1175,6 +1204,9 @@ static int dsi_cmd_dma_add(struct msm_dsi_host *msm_host,
 	/* Append 0xff to the end */
 	if (packet.size < len)
 		memset(data + packet.size, 0xff, len - packet.size);
+
+	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G)
+		msm_gem_put_vaddr(msm_host->tx_gem_obj);
 
 	return len;
 }
@@ -1223,11 +1255,23 @@ static int dsi_long_read_resp(u8 *buf, const struct mipi_dsi_msg *msg)
 
 static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 {
+	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
+	struct drm_device *dev = msm_host->dev;
+	struct msm_drm_private *priv = dev->dev_private;
 	int ret;
 	u32 dma_base;
 	bool triggered;
 
-	dma_base = msm_host->tx_buf_paddr;
+	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
+		ret = msm_gem_get_iova(msm_host->tx_gem_obj,
+				priv->kms->aspace, &dma_base);
+		if (ret) {
+			pr_err("%s: failed to get iova: %d\n", __func__, ret);
+			return ret;
+		}
+	} else {
+		dma_base = msm_host->tx_buf_paddr;
+	}
 
 	reinit_completion(&msm_host->dma_comp);
 
