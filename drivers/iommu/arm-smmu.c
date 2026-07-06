@@ -4513,9 +4513,11 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 						     smmu->smr_mask_mask;
 				smmu->smrs[i].valid = true;
 				dev_notice(smmu->dev,
-					   "\tinherited SMR%d: id 0x%x mask 0x%x\n",
+					   "\tinherited SMR%d: id 0x%x mask 0x%x s2cr 0x%x\n",
 					   i, smmu->smrs[i].id,
-					   smmu->smrs[i].mask);
+					   smmu->smrs[i].mask,
+					   readl_relaxed(gr0_base +
+						ARM_SMMU_GR0_S2CR(i)));
 			}
 		}
 	}
@@ -5845,6 +5847,23 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 	       readl_relaxed(cb + ARM_SMMU_CB_FSYNR0),
 	       readl_relaxed(cb + ARM_SMMU_CB_FAR),
 	       readl_relaxed(cb + ARM_SMMU_CB_TTBR0));
+
+	for (i = 0; i < smmu->num_context_banks; i++) {
+		void __iomem *cbn = ARM_SMMU_CB_BASE(smmu) +
+				    ARM_SMMU_CB(smmu, i);
+
+		pr_err("arm-smmu dump: cb%d cbar=0x%08x cba2r=0x%08x sctlr=0x%08x actlr=0x%08x tcr=0x%08x tcr2=0x%08x mair0=0x%08x mair1=0x%08x ttbr0=0x%08x\n",
+		       i,
+		       readl_relaxed(ARM_SMMU_GR1(smmu) + ARM_SMMU_GR1_CBAR(i)),
+		       readl_relaxed(ARM_SMMU_GR1(smmu) + ARM_SMMU_GR1_CBA2R(i)),
+		       readl_relaxed(cbn + ARM_SMMU_CB_SCTLR),
+		       readl_relaxed(cbn + ARM_SMMU_CB_ACTLR),
+		       readl_relaxed(cbn + ARM_SMMU_CB_TTBCR),
+		       readl_relaxed(cbn + ARM_SMMU_CB_TTBCR2),
+		       readl_relaxed(cbn + ARM_SMMU_CB_S1_MAIR0),
+		       readl_relaxed(cbn + ARM_SMMU_CB_S1_MAIR1),
+		       readl_relaxed(cbn + ARM_SMMU_CB_TTBR0));
+	}
 
 	arm_smmu_power_off(smmu->pwr);
 }
