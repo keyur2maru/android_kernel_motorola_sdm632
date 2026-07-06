@@ -1362,7 +1362,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			 * lanes stopped while the DMA is busy means the lanes never
 			 * entered transmit.
 			 */
-			pr_err("%s: DSI%d dma tx timeout: kicked_off=%d ctrl=0x%x status0=0x%x intr=0x%x fifo=0x%x ack_err=0x%x dln0=0x%x clk=0x%x dma_ctrl=0x%x lane_status=0x%x base=0x%x len=%d\n",
+			pr_err("%s: DSI%d dma tx timeout: kicked_off=%d ctrl=0x%x status0=0x%x intr=0x%x fifo=0x%x ack_err=0x%x dln0=0x%x clk=0x%x dma_ctrl=0x%x lane_status=0x%x lane_ctrl=0x%x trig=0x%x base=0x%x len=%d\n",
 				__func__, msm_host->id, dma_kicked_off,
 				dsi_read(msm_host, REG_DSI_CTRL),
 				dsi_read(msm_host, REG_DSI_STATUS0),
@@ -1373,6 +1373,8 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				dsi_read(msm_host, REG_DSI_CLK_STATUS),
 				dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL),
 				dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4),
+				dsi_read(msm_host, REG_DSI_LANE_CTRL),
+				dsi_read(msm_host, REG_DSI_TRIG_CTRL),
 				dma_base, len);
 			ret = -ETIMEDOUT;
 		}
