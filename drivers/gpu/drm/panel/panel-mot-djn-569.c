@@ -414,6 +414,18 @@ static int djn_569_add(struct djn_569 *ctx)
 		return ret;
 	}
 
+	/*
+	 * Take a reference already at probe: the bootloader hands the panel
+	 * over initialized and lit, and the regulator late cleanup would
+	 * otherwise cut the LCDB bias out from under that live panel seconds
+	 * before the first prepare, leaving the TDDI in an undefined state.
+	 */
+	ret = regulator_bulk_enable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+	if (ret < 0) {
+		dev_err(dev, "failed to enable supplies at probe: %d\n", ret);
+		return ret;
+	}
+
 	/* ASIS: do not glitch the line at probe - the bootloader leaves the
 	 * panel out of reset with the splash live.
 	 */
