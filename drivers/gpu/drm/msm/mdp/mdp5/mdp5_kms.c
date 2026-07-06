@@ -768,9 +768,38 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 				 readl_relaxed(vbif + 0x20c));
 			writel_relaxed(0, vbif + 0x200);
 			writel_relaxed(0, vbif + 0x208);
+
+			/* Downstream qcom,vbif-settings for msm8953: halve
+			 * the AXI outstanding-read limit from its 0x20 reset
+			 * default.  The working stack runs with 0x10; with
+			 * the reset default every translated MDSS read
+			 * parks on the fabric without an error and the
+			 * leaked credits eventually starve other masters.
+			 */
+			writel_relaxed(0x10, vbif + 0x0d0);
 			wmb();
 			mdp5_disable(mdp5_kms);
 			iounmap(vbif);
+		}
+	}
+
+	/* Downstream qcom,mdp-settings for msm8953: zero the per-pipe
+	 * setting register the downstream hw init clears on this SoC
+	 * (offsets relative to the MDSS base).
+	 */
+	{
+		static const u32 mdp_settings[] =
+			{ 0x0506c, 0x1506c, 0x1706c, 0x2506c };
+		void __iomem *mdss = ioremap(0x01a00000, 0x30000);
+		int i;
+
+		if (mdss) {
+			mdp5_enable(mdp5_kms);
+			for (i = 0; i < ARRAY_SIZE(mdp_settings); i++)
+				writel_relaxed(0, mdss + mdp_settings[i]);
+			wmb();
+			mdp5_disable(mdp5_kms);
+			iounmap(mdss);
 		}
 	}
 
