@@ -4488,6 +4488,36 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 		dev_notice(smmu->dev,
 			   "\tstream matching with %lu register groups, mask 0x%x",
 			   size, smmu->smr_mask_mask);
+
+		/*
+		 * With qcom,skip-init the bootloader's stream mapping
+		 * survives reset.  Import the live entries so stream
+		 * allocation reuses their indexes instead of installing a
+		 * second match for the same stream ID: two valid SMRs
+		 * matching one transaction is architecturally unpredictable,
+		 * and left the display master's translation a per-boot coin
+		 * toss between the kernel's context bank and the
+		 * bootloader's bypass entry.
+		 */
+		if (smmu->options & ARM_SMMU_OPT_SKIP_INIT) {
+			u32 smr;
+
+			for (i = 0; i < size; i++) {
+				smr = readl_relaxed(gr0_base +
+						    ARM_SMMU_GR0_SMR(i));
+				if (!(smr & SMR_VALID))
+					continue;
+				smmu->smrs[i].id = (smr >> SMR_ID_SHIFT) &
+						   smmu->streamid_mask;
+				smmu->smrs[i].mask = (smr >> SMR_MASK_SHIFT) &
+						     smmu->smr_mask_mask;
+				smmu->smrs[i].valid = true;
+				dev_notice(smmu->dev,
+					   "\tinherited SMR%d: id 0x%x mask 0x%x\n",
+					   i, smmu->smrs[i].id,
+					   smmu->smrs[i].mask);
+			}
+		}
 	}
 	/* s2cr->type == 0 means translation, so initialise explicitly */
 	smmu->s2crs = devm_kmalloc_array(smmu->dev, size, sizeof(*smmu->s2crs),
