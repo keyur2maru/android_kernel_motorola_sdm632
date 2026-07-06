@@ -182,6 +182,7 @@ struct msm_dsi_host {
 	int num_data_lanes;
 
 	u32 dma_cmd_ctrl_restore;
+	bool clkln_hs_force_released;
 
 	bool registered;
 	bool power_on;
@@ -2098,6 +2099,45 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 		DSI_CTRL_ENABLE);
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
 
+	/*
+	 * An LP escape transfer only starts once every lane, including the
+	 * clock lane, is in stop state.  With CLKLN_HS_FORCE_REQUEST latched
+	 * for the video session the clock lane never re-enters LP-11, so an
+	 * LP command DMA kicks off and hangs (backlight DCS while streaming:
+	 * LANE_STATUS 0x1f0f, lane FIFOs loaded, no escape).  Release the
+	 * force for the duration of the transfer and give the clock lane up
+	 * to two frames to drop to stop state at a blanking boundary; the
+	 * force is re-requested in msm_dsi_host_xfer_restore.  The downstream
+	 * host never runs this panel with the force latched and its LP
+	 * command path clears the same bit before command DMA
+	 * (mdss_dsi_stop_hs_clk_lane).
+	 */
+	msm_host->clkln_hs_force_released = false;
+	if (msg->flags & MIPI_DSI_MSG_USE_LPM) {
+		u32 lane_ctrl = dsi_read(msm_host, REG_DSI_LANE_CTRL);
+
+		if (lane_ctrl & DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST) {
+			int i;
+
+			dsi_write(msm_host, REG_DSI_LANE_CTRL, lane_ctrl &
+					~DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+			msm_host->clkln_hs_force_released = true;
+
+			/* LANE_STATUS, one register below LANE_CTRL; bit 4 =
+			 * clock lane in stop state
+			 */
+			for (i = 0; i < 350; i++) {
+				if (dsi_read(msm_host,
+					     REG_DSI_LANE_CTRL - 0x4) & BIT(4))
+					break;
+				usleep_range(100, 150);
+			}
+			if (i == 350)
+				pr_warn("%s: clock lane did not reach stop state for LP cmd\n",
+					__func__);
+		}
+	}
+
 	return 0;
 }
 
@@ -2105,6 +2145,13 @@ void msm_dsi_host_xfer_restore(struct mipi_dsi_host *host,
 				const struct mipi_dsi_msg *msg)
 {
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
+
+	if (msm_host->clkln_hs_force_released) {
+		dsi_write(msm_host, REG_DSI_LANE_CTRL,
+			dsi_read(msm_host, REG_DSI_LANE_CTRL) |
+			DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+		msm_host->clkln_hs_force_released = false;
+	}
 
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
 	dsi_write(msm_host, REG_DSI_CTRL, msm_host->dma_cmd_ctrl_restore);
