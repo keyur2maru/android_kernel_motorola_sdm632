@@ -844,6 +844,34 @@ static void pll_db_commit_8996(struct mdss_pll_resources *pll,
 }
 
 /*
+ * pll_source_standalone_config:
+ * Enable the PLL right output and select the bit clock source from the left,
+ * i.e. the single internal DSI (standalone) routing.
+ *
+ * On the downstream fbdev/SDE stack this is done by
+ * mdss_dsi_8996_pll_source_standalone() from the DSI PHY code, which is why
+ * pll_db_commit_8996() deliberately skips CLKBUFLR_EN ("updated at dsi phy").
+ * In the drm/msm hybrid the downstream PHY path never runs and the drm 14nm
+ * PLL driver is compiled out (CONFIG_DRM_MSM_DSI_PLL off), so nothing enables
+ * the PLL output buffer: the VCO can lock but no byte/pixel clock leaves the
+ * block and gcc_mdss_byte0_clk reads "stuck off". Program the routing here so
+ * the mdss-pll is self-sufficient. Only DSI0 drives an internal panel on this
+ * board, so the standalone routing always applies.
+ */
+static void pll_source_standalone_config(struct mdss_pll_resources *pll)
+{
+	u32 data;
+
+	MDSS_PLL_REG_W(pll->pll_base, DSIPHY_PLL_CLKBUFLR_EN, PLL_OUTPUT_RIGHT);
+
+	data = MDSS_PLL_REG_R(pll->pll_base, DSIPHY_CMN_GLBL_TEST_CTRL);
+	data &= ~BIT(2);
+	MDSS_PLL_REG_W(pll->pll_base, DSIPHY_CMN_GLBL_TEST_CTRL, data);
+
+	wmb(); /* ensure output routing is committed before source detection */
+}
+
+/*
  * pll_source_finding:
  * Both GLBL_TEST_CTRL and CLKBUFLR_EN are configured
  * at mdss_dsi_8996_phy_config()
@@ -932,6 +960,13 @@ int pll_vco_set_rate_8996(struct clk *c, unsigned long rate)
 		pr_err("Failed to enable mdss dsi plla=%d\n", pll->index);
 		return rc;
 	}
+
+	/*
+	 * Enable the standalone PLL output routing before source detection.
+	 * The drm/msm hybrid has no downstream PHY code to program CLKBUFLR_EN,
+	 * so do it here or the locked VCO produces no byte/pixel clock.
+	 */
+	pll_source_standalone_config(pll);
 
 	pll_source_setup(pll);
 
