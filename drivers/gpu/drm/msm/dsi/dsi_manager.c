@@ -171,7 +171,15 @@ dsi_mgr_phy_enable(int id,
 			}
 		}
 	} else {
-		msm_dsi_host_reset_phy(mdsi->host);
+		/* Do not pulse DSI_PHY_RESET here.  On the 14nm PHY the
+		 * downstream host uses this controller-side PHY reset only in
+		 * error recovery (mdss_dsi_ctrl_phy_reset); its init path
+		 * resets the PHY digital block from the PHY itself, which
+		 * dsi_14nm_phy_enable() already does (CMN_CTRL_1 toggle).
+		 * The bootloader hands this link over live, so pulsing the
+		 * reset into a PHY whose clock lane may still be driving HS
+		 * leaves escape-mode state wedged on a fraction of boots.
+		 */
 		ret = enable_phy(msm_dsi, src_pll_id, &shared_timings[id]);
 		if (ret)
 			return ret;
