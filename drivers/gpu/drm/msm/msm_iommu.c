@@ -140,3 +140,8 @@ struct msm_mmu *msm_iommu_new(struct device *dev, struct iommu_domain *domain)
 
 	return &iommu->base;
 }
+
+struct iommu_domain *msm_iommu_get_domain(struct msm_mmu *mmu)
+{
+	return to_msm_iommu(mmu)->domain;
+}

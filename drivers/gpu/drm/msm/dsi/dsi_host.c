@@ -29,6 +29,8 @@
 #include <video/mipi_display.h>
 
 #include "dsi.h"
+#include "../msm_gem.h"
+#include "../msm_mmu.h"
 #include "dsi.xml.h"
 #include "sfpb.xml.h"
 #include "dsi_cfg.h"
@@ -183,6 +185,7 @@ struct msm_dsi_host {
 
 	u32 dma_cmd_ctrl_restore;
 	bool clkln_hs_force_released;
+	u32 tx_iova;
 
 	bool registered;
 	bool power_on;
@@ -1084,6 +1087,9 @@ static void dsi_wait4video_eng_busy(struct msm_dsi_host *msm_host)
 	}
 }
 
+/* fixed iova for the command TX buffer, above any gem allocation */
+#define DSI_TX_BUF_IOVA	0xff000000
+
 /* dsi_cmd */
 static int dsi_tx_buf_alloc(struct msm_dsi_host *msm_host, int size)
 {
@@ -1094,31 +1100,38 @@ static int dsi_tx_buf_alloc(struct msm_dsi_host *msm_host, int size)
 	u32 iova;
 
 	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
-		mutex_lock(&dev->struct_mutex);
-		msm_host->tx_gem_obj = msm_gem_new(dev, size, MSM_BO_UNCACHED);
-		if (IS_ERR(msm_host->tx_gem_obj)) {
-			ret = PTR_ERR(msm_host->tx_gem_obj);
-			pr_err("%s: failed to allocate gem, %d\n",
-				__func__, ret);
-			msm_host->tx_gem_obj = NULL;
-			mutex_unlock(&dev->struct_mutex);
-			return ret;
+		struct iommu_domain *domain;
+
+		/*
+		 * The command fetch is translated by the display SMMU.  A
+		 * fetch through the gem-backed mapping hangs the context
+		 * bank on this platform (DMA latches busy, nothing reaches
+		 * the FIFOs, subsequent TLBSYNCs time out), while a plain
+		 * unmapped physical address faults and feeds the serializer
+		 * garbage.  Use a coherent buffer with a single explicitly
+		 * created mapping instead: one page, one PTE, mapped once.
+		 */
+		msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
+					&msm_host->tx_buf_paddr, GFP_KERNEL);
+		if (!msm_host->tx_buf) {
+			pr_err("%s: failed to allocate tx buf\n", __func__);
+			return -ENOMEM;
 		}
 
-		ret = msm_gem_get_iova_locked(msm_host->tx_gem_obj,
-				priv->kms->aspace, &iova);
-		mutex_unlock(&dev->struct_mutex);
+		domain = msm_iommu_get_domain(priv->kms->aspace->mmu);
+		iova = DSI_TX_BUF_IOVA;
+		ret = iommu_map(domain, iova, msm_host->tx_buf_paddr,
+				size, IOMMU_READ);
 		if (ret) {
-			pr_err("%s: failed to get iova, %d\n", __func__, ret);
+			pr_err("%s: failed to map tx buf: %d\n", __func__,
+			       ret);
 			return ret;
 		}
+		pr_info("%s: tx buf phys=%pad iova=0x%08x\n", __func__,
+			&msm_host->tx_buf_paddr, iova);
 
-		if (iova & 0x07) {
-			pr_err("%s: buf NOT 8 bytes aligned\n", __func__);
-			return -EINVAL;
-		}
-
-		msm_host->tx_size = msm_host->tx_gem_obj->size;
+		msm_host->tx_iova = iova;
+		msm_host->tx_size = size;
 	} else {
 		msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
 					&msm_host->tx_buf_paddr, GFP_KERNEL);
@@ -1176,16 +1189,7 @@ static int dsi_cmd_dma_add(struct msm_dsi_host *msm_host,
 		return -EINVAL;
 	}
 
-	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
-		data = msm_gem_get_vaddr(msm_host->tx_gem_obj);
-		if (IS_ERR(data)) {
-			ret = PTR_ERR(data);
-			pr_err("%s: get vaddr failed, %d\n", __func__, ret);
-			return ret;
-		}
-	} else {
-		data = msm_host->tx_buf;
-	}
+	data = msm_host->tx_buf;
 
 	/* MSM specific command format in memory */
 	data[0] = packet.header[1];
@@ -1204,9 +1208,6 @@ static int dsi_cmd_dma_add(struct msm_dsi_host *msm_host,
 	/* Append 0xff to the end */
 	if (packet.size < len)
 		memset(data + packet.size, 0xff, len - packet.size);
-
-	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G)
-		msm_gem_put_vaddr(msm_host->tx_gem_obj);
 
 	return len;
 }
@@ -1262,16 +1263,10 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	u32 dma_base;
 	bool triggered;
 
-	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
-		ret = msm_gem_get_iova(msm_host->tx_gem_obj,
-				priv->kms->aspace, &dma_base);
-		if (ret) {
-			pr_err("%s: failed to get iova: %d\n", __func__, ret);
-			return ret;
-		}
-	} else {
+	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G)
+		dma_base = msm_host->tx_iova;
+	else
 		dma_base = msm_host->tx_buf_paddr;
-	}
 
 	reinit_completion(&msm_host->dma_comp);
 
