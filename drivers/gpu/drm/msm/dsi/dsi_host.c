@@ -1438,7 +1438,12 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					{ "mdsstop", 0x01a00000, 0x100 },
 					{ "vbif",    0x01ab0000, 0x310 },
 					{ "vbifqos", 0x01ab0400, 0x100 },
+					{ "vbifhi",  0x01ab0500, 0xb40 },
 					{ "dsi0",    0x01a94000, 0x400 },
+					{ "vig0",    0x01a05000, 0x200 },
+					{ "rgb0",    0x01a15000, 0x200 },
+					{ "rgb1",    0x01a17000, 0x200 },
+					{ "dma0",    0x01a25000, 0x200 },
 				};
 				int r;
 				u32 off;

@@ -5890,6 +5890,27 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 		       readl_relaxed(cbn + ARM_SMMU_CB_TTBR0));
 	}
 
+	/* The qsmmuv500 TCU implementation-defined page (dt "tcu-base"),
+	 * readable here because the SMMU power/clocks are held.
+	 */
+	{
+		void __iomem *tcu = ioremap(0x01ee2000, 0x20);
+
+		if (tcu) {
+			pr_err("VG: tcu +0x000: %08x %08x %08x %08x\n",
+			       readl_relaxed(tcu + 0x0),
+			       readl_relaxed(tcu + 0x4),
+			       readl_relaxed(tcu + 0x8),
+			       readl_relaxed(tcu + 0xc));
+			pr_err("VG: tcu +0x010: %08x %08x %08x %08x\n",
+			       readl_relaxed(tcu + 0x10),
+			       readl_relaxed(tcu + 0x14),
+			       readl_relaxed(tcu + 0x18),
+			       readl_relaxed(tcu + 0x1c));
+			iounmap(tcu);
+		}
+	}
+
 	arm_smmu_power_off(smmu->pwr);
 }
 EXPORT_SYMBOL(arm_smmu_debug_dump_domain);
