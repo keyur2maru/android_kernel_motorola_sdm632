@@ -274,9 +274,8 @@ static int djn_569_bl_update_status(struct backlight_device *bl)
 	    bl->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK))
 		brightness = 0;
 
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+	ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
 	if (ret < 0)
 		return ret;
 
