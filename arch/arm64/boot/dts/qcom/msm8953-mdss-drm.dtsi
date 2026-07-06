@@ -42,7 +42,17 @@
 
 		vdd-supply = <&gdsc_mdss>;
 
-		interrupts = <0 72 0>;
+		/*
+		 * SPI 72 is the MDSS summary interrupt: a level-high line that
+		 * stays asserted until every sub-block (MDP vblank, DSI cmd-done)
+		 * status bit is cleared by mdss_irq()'s demux.  It was <0 72 0>
+		 * (IRQ_TYPE_NONE) which the GIC treats as edge, so any sub-block
+		 * asserting while another is dispatched produced no fresh edge and
+		 * the interrupt was lost (mpm-gic 104 count froze -> DSI cmd DMA
+		 * and MDP vblank both timed out).  Declare it IRQ_TYPE_LEVEL_HIGH
+		 * so the GIC keeps re-raising until mdss_irq() fully drains it.
+		 */
+		interrupts = <0 72 4>;
 		interrupt-controller;
 		#interrupt-cells = <1>;
 
