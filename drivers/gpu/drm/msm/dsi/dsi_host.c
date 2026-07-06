@@ -1223,13 +1223,50 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	triggered = msm_dsi_manager_cmd_xfer_trigger(
 						msm_host->id, dma_base, len);
 	if (triggered) {
-		ret = wait_for_completion_timeout(&msm_host->dma_comp,
-					msecs_to_jiffies(200));
-		DBG("ret=%d", ret);
-		if (ret == 0)
+		unsigned long jiffies_end = jiffies + msecs_to_jiffies(200);
+		unsigned long flags;
+		u32 status;
+
+		ret = 0;
+		do {
+			/*
+			 * Fast path: dsi_host_irq() signals dma_comp when the
+			 * CMD_DMA_DONE interrupt is taken.
+			 */
+			if (wait_for_completion_timeout(&msm_host->dma_comp,
+					msecs_to_jiffies(2)) > 0) {
+				ret = len;
+				break;
+			}
+
+			/*
+			 * The MDSS summary interrupt is routed through the MPM
+			 * (interrupt-parent = <&wakegic>), which delivers a
+			 * sparse, isolated interrupt unreliably when the CPU
+			 * idles between the panel-init commands, so an isolated
+			 * CMD_DMA_DONE can be lost. Poll the latched status bit
+			 * as a backstop: if the DMA has actually finished, ack
+			 * the status and treat the command as done rather than
+			 * hanging on the missing interrupt. Mirrors the
+			 * downstream SDE host (dsi_ctrl_cmd_transfer:
+			 * "dma_tx done but irq not triggered").
+			 */
+			spin_lock_irqsave(&msm_host->intr_lock, flags);
+			status = dsi_read(msm_host, REG_DSI_INTR_CTRL);
+			if (status & DSI_IRQ_CMD_DMA_DONE)
+				dsi_write(msm_host, REG_DSI_INTR_CTRL, status);
+			spin_unlock_irqrestore(&msm_host->intr_lock, flags);
+
+			if (status & DSI_IRQ_CMD_DMA_DONE) {
+				ret = len;
+				break;
+			}
+		} while (time_before(jiffies, jiffies_end));
+
+		if (ret == 0) {
+			DBG("dma tx timed out");
 			ret = -ETIMEDOUT;
-		else
-			ret = len;
+		}
 	} else
 		ret = len;
 
