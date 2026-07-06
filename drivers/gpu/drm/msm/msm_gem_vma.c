@@ -272,18 +272,27 @@ msm_gem_address_space_new(struct msm_mmu *mmu, const char *name,
 		return ERR_PTR(-ENOMEM);
 
 	/*
-	 * Never hand out IOVA 0.  The first drm_mm allocation lands at the
-	 * range base, and arm-smmu leaves domain->geometry.aperture_start at 0
-	 * (only aperture_end is set), so without this the first mapped buffer
-	 * gets iova 0.  Engines that take a buffer address in a register -- the
-	 * DSI command DMA writes it to REG_DSI_DMA_BASE -- treat 0 as "no
-	 * buffer" and stall.  Reserve the first page so the base is >= PAGE_SIZE,
-	 * matching mainline mdp5 which passes va_start=0x1000 to this allocator.
+	 * Never hand out IOVA 0.  The first drm_mm allocation lands at the range
+	 * base; arm-smmu leaves domain->geometry.aperture_start at 0, so without
+	 * this the first mapped buffer gets iova 0, which the DSI command DMA
+	 * (REG_DSI_DMA_BASE) treats as "no buffer" and stalls on.  Reserve the
+	 * first page so the base is >= PAGE_SIZE.
+	 *
+	 * geometry.aperture_end is only populated when the domain is attached
+	 * (arm-smmu sets it in ->finalise), which happens AFTER this runs, so
+	 * `end` is 0 here.  The old size = (end>>PAGE_SHIFT)-1 then wrapped to
+	 * ~0ULL -- harmless while start was 0, but clamping start>0 made
+	 * start+size overflow into an empty range (drm_mm_insert_node -ENOSPC).
+	 * Use an explicit 4GB VA window from 0x1000, exactly like mainline mdp5
+	 * (va_start=0x1000, va_size=0x100000000-0x1000), and size it relative to
+	 * start so it can never overflow.
 	 */
 	start = max_t(u64, start, PAGE_SIZE);
+	if (end <= start)
+		end = 1ULL << 32;	/* 4GB */
 
-	drm_mm_init(&local->mm, (start >> PAGE_SHIFT),
-		(end >> PAGE_SHIFT) - 1);
+	drm_mm_init(&local->mm, start >> PAGE_SHIFT,
+		(end - start) >> PAGE_SHIFT);
 
 	local->base.name = name;
 	local->base.mmu = mmu;
