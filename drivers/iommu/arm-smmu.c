@@ -5848,6 +5848,30 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 	       readl_relaxed(cb + ARM_SMMU_CB_FAR),
 	       readl_relaxed(cb + ARM_SMMU_CB_TTBR0));
 
+	/* Pagetable root: what the domain thinks vs what the bank was
+	 * programmed with, and the first PGD entries as the CPU sees them
+	 * (cached linear map) vs as the walker would (uncached DRAM alias).
+	 * Divergent views mean the tables never reached memory and the
+	 * dma-coherent walk assumption does not hold at runtime.
+	 */
+	{
+		u64 cfg_ttbr = smmu_domain->pgtbl_cfg.arm_lpae_s1_cfg.ttbr[0];
+		phys_addr_t pgd_phys = cfg_ttbr & GENMASK_ULL(47, 12);
+		u64 *cached = phys_to_virt(pgd_phys);
+		u64 *uncached = memremap(pgd_phys, PAGE_SIZE, MEMREMAP_WC);
+
+		pr_err("arm-smmu dump: cfg_ttbr=0x%llx pgd_phys=%pa\n",
+		       cfg_ttbr, &pgd_phys);
+		pr_err("arm-smmu dump: pgd cached  %016llx %016llx %016llx %016llx\n",
+		       cached[0], cached[1], cached[2], cached[3]);
+		if (uncached) {
+			pr_err("arm-smmu dump: pgd uncached %016llx %016llx %016llx %016llx\n",
+			       uncached[0], uncached[1], uncached[2],
+			       uncached[3]);
+			memunmap(uncached);
+		}
+	}
+
 	for (i = 0; i < smmu->num_context_banks; i++) {
 		void __iomem *cbn = ARM_SMMU_CB_BASE(smmu) +
 				    ARM_SMMU_CB(smmu, i);
