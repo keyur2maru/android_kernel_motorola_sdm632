@@ -78,14 +78,24 @@ static ssize_t djn_569_generic_long_write(struct mipi_dsi_device *dsi,
 			return ret;					\
 	} while (0)
 
+/*
+ * Downstream reset waveform (qcom,mdss-dsi-reset-sequence <1 10>, <0 10>,
+ * <1 5> + 7ms init delay): physically high 10ms, low 10ms, then high and
+ * hold before the first command.  Drive raw line levels: the TDDI touch
+ * MCU on the same die survives the probe-time logical-high write, so the
+ * active-low flag on this gpio is not being applied and logical values
+ * ended the sequence with the line low - the panel sat in hardware reset
+ * through the whole init stream (touch drops off i2c at exactly that
+ * moment and the power-mode readback returns nothing).
+ */
 static void djn_569_reset(struct djn_569 *ctx)
 {
-	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	gpiod_direction_output_raw(ctx->reset_gpio, 1);
 	usleep_range(10000, 11000);
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
 	usleep_range(10000, 11000);
-	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	usleep_range(5000, 6000);
+	gpiod_set_raw_value_cansleep(ctx->reset_gpio, 1);
+	usleep_range(20000, 21000);
 }
 
 static int djn_569_on(struct djn_569 *ctx)
@@ -216,7 +226,7 @@ static int djn_569_unprepare(struct drm_panel *panel)
 		gpiod_set_value_cansleep(ctx->hbm_gpio, 0);
 	if (ctx->bklt_en_gpio)
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 0);
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
 
 	regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
 
@@ -253,7 +263,7 @@ static int djn_569_prepare(struct drm_panel *panel)
 	ret = djn_569_on(ctx);
 	if (ret < 0) {
 		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
-		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+		gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
 		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies),
 				       ctx->supplies);
 		return ret;
@@ -404,7 +414,10 @@ static int djn_569_add(struct djn_569 *ctx)
 		return ret;
 	}
 
-	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	/* ASIS: do not glitch the line at probe - the bootloader leaves the
+	 * panel out of reset with the splash live.
+	 */
+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
 	if (IS_ERR(ctx->reset_gpio)) {
 		ret = PTR_ERR(ctx->reset_gpio);
 		dev_err(dev, "failed to get reset-gpios: %d\n", ret);
