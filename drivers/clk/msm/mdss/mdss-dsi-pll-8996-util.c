@@ -348,6 +348,7 @@ int dsi_pll_enable_seq_8996(struct mdss_pll_resources *pll)
 		pll->cache_pll_trim_codes_rate);
 
 init_lock_err:
+	pr_info("DSI%d PLL lock at enable: locked=%d\n", pll->index, rc == 0);
 	return rc;
 }
 
