@@ -106,7 +106,17 @@ static int djn_569_on(struct djn_569 *ctx)
 	dsi_generic_write_seq(dsi, 0x87, 0x8c);
 	dsi_generic_write_seq(dsi, 0xff, 0x10);
 	dsi_generic_write_seq(dsi, 0xfb, 0x01);
-	dsi_generic_write_seq(dsi, 0x51, 0x00);
+	/*
+	 * Set full brightness here in the LP init phase, not 0x00.  0x53=0x24
+	 * enables the DCS backlight control block, but the brightness (0x51) is
+	 * what the LED driver actually uses.  Runtime backlight updates run while
+	 * video is streaming, and DCS commands cannot be transmitted during active
+	 * video on this setup (the data lanes carry the pixel stream), so the
+	 * runtime 0x51 write stalls -- leaving the panel dark if init left it 0.
+	 * Program it on here while the LP init path works; runtime updates are
+	 * then best-effort refinements, not required for a lit panel.
+	 */
+	dsi_generic_write_seq(dsi, 0x51, 0xff);
 	dsi_generic_write_seq(dsi, 0x53, 0x24);
 	dsi_generic_write_seq(dsi, 0x55, 0x01);
 
