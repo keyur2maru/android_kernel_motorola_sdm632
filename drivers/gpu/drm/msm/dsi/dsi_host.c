@@ -185,6 +185,7 @@ struct msm_dsi_host {
 
 	bool registered;
 	bool power_on;
+	bool link_clk_rate_logged;
 	int irq;
 };
 
@@ -515,6 +516,23 @@ static int dsi_link_clk_enable_6g(struct msm_dsi_host *msm_host)
 	if (ret) {
 		pr_err("%s: Failed to enable dsi pixel clk\n", __func__);
 		goto pixel_clk_err;
+	}
+
+	/*
+	 * One-shot report of the rates actually programmed into the link clocks
+	 * once they are running. clk debugfs is not mounted on the device build,
+	 * so this is the only way to confirm the byte/pixel/esc DSI clocks are at
+	 * the values dsi_calc_clk_rate() computed for the panel mode (byte and
+	 * escape must both be live for LP-mode DCS init writes to transmit).
+	 */
+	if (!msm_host->link_clk_rate_logged) {
+		msm_host->link_clk_rate_logged = true;
+		pr_info("%s: DSI%d link clocks: byte=%lu pixel=%lu esc=%lu (req byte=%d pixel=%d)\n",
+			__func__, msm_host->id,
+			clk_get_rate(msm_host->byte_clk),
+			clk_get_rate(msm_host->pixel_clk),
+			clk_get_rate(msm_host->esc_clk),
+			msm_host->byte_clk_rate, msm_host->mode->clock * 1000);
 	}
 
 	return 0;
