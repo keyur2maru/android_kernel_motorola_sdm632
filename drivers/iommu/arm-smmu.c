@@ -62,6 +62,7 @@
 #include <soc/qcom/msm_tz_smmu.h>
 
 #include "io-pgtable.h"
+#include <asm/cacheflush.h>
 
 /* Maximum number of context banks per SMMU */
 #define ARM_SMMU_MAX_CBS		128
@@ -5892,3 +5893,35 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 	arm_smmu_power_off(smmu->pwr);
 }
 EXPORT_SYMBOL(arm_smmu_debug_dump_domain);
+
+/*
+ * Clean every pagetable page on the walk path of @iova to DRAM.  The
+ * software walk resolves while the hardware walk does not, and this SMMU
+ * relies on dma-coherent table walks with no cache maintenance on PTE
+ * writes; if a retried fetch completes after this clean, the tables were
+ * sitting dirty in the CPU cache and the coherent-walk assumption is
+ * broken at runtime.
+ */
+void arm_smmu_debug_clean_pgtables(struct iommu_domain *domain,
+				   unsigned long iova)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	u64 ttbr = smmu_domain->pgtbl_cfg.arm_lpae_s1_cfg.ttbr[0];
+	phys_addr_t tbl = ttbr & GENMASK_ULL(47, 12);
+	int level;
+
+	for (level = 0; level < 4; level++) {
+		u64 *va = phys_to_virt(tbl);
+		int shift = 39 - 9 * level;
+		u64 desc;
+
+		__flush_dcache_area(va, PAGE_SIZE);
+		desc = va[(iova >> shift) & 0x1ff];
+		pr_err("arm-smmu clean: level %d tbl %pa desc %016llx\n",
+		       level, &tbl, desc);
+		if ((desc & 3) != 3)
+			break;
+		tbl = desc & GENMASK_ULL(47, 12);
+	}
+}
+EXPORT_SYMBOL(arm_smmu_debug_clean_pgtables);

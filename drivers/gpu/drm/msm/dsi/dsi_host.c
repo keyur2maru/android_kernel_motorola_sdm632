@@ -1417,25 +1417,35 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					dma_base) });
 			}
 
-			/* One-shot probe: retry the DMA from the imem
-			 * mapping.  Completion means translation works and
-			 * the DRAM target path is what hangs; a second hang
-			 * means translation processing itself.
+			/* One-shot probe: clean the pagetable walk path of
+			 * this address to DRAM and retry the same fetch.
+			 * Completion proves the tables were dirty in the CPU
+			 * cache and the dma-coherent walk assumption is
+			 * broken at runtime.
 			 */
 			{
+				extern void arm_smmu_debug_clean_pgtables(
+					struct iommu_domain *domain,
+					unsigned long iova);
 				static bool probed;
 
 				if (!probed) {
 					unsigned long pend;
+					struct msm_drm_private *p3 =
+						msm_host->dev->dev_private;
 
 					probed = true;
+					arm_smmu_debug_clean_pgtables(
+						msm_iommu_get_domain(
+						  p3->kms->aspace->mmu),
+						dma_base);
 					reinit_completion(&msm_host->dma_comp);
 					msm_dsi_manager_cmd_xfer_trigger(
-						msm_host->id, 0xfe000000, 4);
+						msm_host->id, dma_base, len);
 					pend = wait_for_completion_timeout(
 						&msm_host->dma_comp,
 						msecs_to_jiffies(200));
-					pr_err("%s: imem probe fetch: %s (status0=0x%x intr=0x%x)\n",
+					pr_err("%s: post-clean retry: %s (status0=0x%x intr=0x%x)\n",
 					       __func__,
 					       pend ? "COMPLETED" : "hung",
 					       dsi_read(msm_host, REG_DSI_STATUS0),
