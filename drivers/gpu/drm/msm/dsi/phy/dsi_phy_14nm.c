@@ -98,8 +98,21 @@ static int dsi_14nm_phy_enable(struct msm_dsi_phy *phy, int src_pll_id,
 		dsi_14nm_dphy_set_timing(phy, timing, i);
 	}
 
-	/* Make sure PLL is not start */
-	dsi_phy_write(base + REG_DSI_14nm_PHY_CMN_PLL_CNTRL, 0x00);
+	/*
+	 * "Make sure PLL is not start" belongs to the drm/msm 14nm PLL bring-up.
+	 * On this board CONFIG_DRM_MSM_DSI_PLL is off and the downstream
+	 * MSM_MDSS_PLL owns DSI PLL start/stop/lock (dsi_pll_start_8996 writes
+	 * CMN_PLL_CNTRL=1).  The known-good downstream PHY config
+	 * (mdss_dsi_8996_phy_config) never writes CMN_PLL_CNTRL at all.  If the
+	 * byte/pixel clock is already prepared (bootloader splash handoff or an
+	 * earlier host on/off cycle) the mdss-pll is already running and locked;
+	 * clearing CMN_PLL_CNTRL here stops it while nothing restarts it (the clk
+	 * prepare is refcounted, so dsi_pll_enable_seq_8996 does not re-run) ->
+	 * no byte clock -> the DSI command DMA never completes (-ETIMEDOUT).
+	 * Only touch it when a real drm PLL owns the block.
+	 */
+	if (!IS_ERR_OR_NULL(phy->pll))
+		dsi_phy_write(base + REG_DSI_14nm_PHY_CMN_PLL_CNTRL, 0x00);
 
 	wmb(); /* make sure everything is written before reset and enable */
 
