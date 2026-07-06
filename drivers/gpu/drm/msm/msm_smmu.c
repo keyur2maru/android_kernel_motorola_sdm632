@@ -373,11 +373,18 @@ static const struct msm_mmu_funcs funcs = {
 	.one_to_one_unmap = msm_smmu_one_to_one_unmap,
 };
 
+/* The unsecure domain uses the downstream msm8953 mdp_0 range
+ * (mdss_smmu.c: SZ_128M to SZ_4G): the DMA-IOMMU allocator hands out
+ * iovas bottom-up, so display buffers land in the low-iova window the
+ * downstream stack validates on this hardware.  With the SDE-era
+ * SZ_2G base every fetch carries bit 31 and the MDSS master path
+ * never completes the translated read.
+ */
 static struct msm_smmu_domain msm_smmu_domains[MSM_SMMU_DOMAIN_MAX] = {
 	[MSM_SMMU_DOMAIN_UNSECURE] = {
 		.label = "mdp_ns",
-		.va_start = SZ_2G,
-		.va_size = SZ_4G - SZ_2G,
+		.va_start = SZ_128M,
+		.va_size = SZ_4G - SZ_128M,
 		.secure = false,
 	},
 	[MSM_SMMU_DOMAIN_SECURE] = {
