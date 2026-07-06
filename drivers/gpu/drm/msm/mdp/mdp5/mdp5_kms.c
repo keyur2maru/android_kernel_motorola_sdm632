@@ -609,6 +609,20 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	mdelay(16);
 
 	if (config->platform.iommu) {
+		int stall_disable = 1;
+
+		/* Terminate faulted transactions instead of stalling them:
+		 * a stalled fault whose context interrupt is never serviced
+		 * parks the TBU and every later MDSS read (DSI command
+		 * fetch, scanout) queues behind it forever.  Observed live:
+		 * CB FSR=0x400 latched on iova 0 while the first command
+		 * fetch hung.  The downstream SDE KMS sets the same
+		 * attribute on its display domains.
+		 */
+		iommu_domain_set_attr(config->platform.iommu,
+				      DOMAIN_ATTR_CB_STALL_DISABLE,
+				      &stall_disable);
+
 		/*
 		 * Use the mainline msm_iommu address space (msm_iommu_aspace_ops:
 		 * drm_mm iova allocation + msm_iommu_map), NOT the SDE
