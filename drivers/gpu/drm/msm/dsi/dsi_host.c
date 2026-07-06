@@ -1421,6 +1421,45 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					dma_base) });
 			}
 
+			/* Full master-path state at the hang, for a
+			 * register-level diff against the same ranges
+			 * captured on the working downstream stack
+			 * (groundtruth-los-recovery/vg-dump.log).  DSI bus
+			 * clocks are held here so the MDSS domain is
+			 * readable.  One-shot.
+			 */
+			{
+				static bool dumped;
+				static const struct {
+					const char *tag;
+					u32 pa;
+					u32 len;
+				} ranges[] = {
+					{ "mdsstop", 0x01a00000, 0x100 },
+					{ "vbif",    0x01ab0000, 0x310 },
+					{ "vbifqos", 0x01ab0400, 0x100 },
+					{ "dsi0",    0x01a94000, 0x400 },
+				};
+				int r;
+				u32 off;
+
+				for (r = 0; !dumped && r < ARRAY_SIZE(ranges); r++) {
+					void __iomem *b = ioremap(ranges[r].pa,
+								  ranges[r].len);
+					if (!b)
+						continue;
+					for (off = 0; off < ranges[r].len; off += 16)
+						pr_err("VG: %s +0x%03x: %08x %08x %08x %08x\n",
+						       ranges[r].tag, off,
+						       readl_relaxed(b + off),
+						       readl_relaxed(b + off + 4),
+						       readl_relaxed(b + off + 8),
+						       readl_relaxed(b + off + 12));
+					iounmap(b);
+				}
+				dumped = true;
+			}
+
 			/* One-shot probe: clean the pagetable walk path of
 			 * this address to DRAM and retry the same fetch.
 			 * Completion proves the tables were dirty in the CPU
