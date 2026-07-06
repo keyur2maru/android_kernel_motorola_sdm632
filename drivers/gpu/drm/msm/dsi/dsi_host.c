@@ -1121,6 +1121,17 @@ static int dsi_tx_buf_alloc(struct msm_dsi_host *msm_host, int size)
 		}
 
 		msm_host->tx_size = msm_host->tx_gem_obj->size;
+
+		/* Diagnostic probe mapping: system imem (SRAM, not DRAM) at a
+		 * fixed iova, so a hung DRAM fetch can be retried against a
+		 * non-DRAM target to separate a translation failure from a
+		 * dead DRAM path.
+		 */
+		ret = iommu_map(msm_iommu_get_domain(priv->kms->aspace->mmu),
+				0xfe000000, 0x08600000, SZ_4K, IOMMU_READ);
+		if (ret)
+			pr_err("%s: imem probe map failed: %d\n", __func__,
+			       ret);
 	} else {
 		msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
 					&msm_host->tx_buf_paddr, GFP_KERNEL);
@@ -1387,6 +1398,32 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				arm_smmu_debug_dump_domain(
 					msm_iommu_get_domain(
 						p2->kms->aspace->mmu));
+			}
+
+			/* One-shot probe: retry the DMA from the imem
+			 * mapping.  Completion means translation works and
+			 * the DRAM target path is what hangs; a second hang
+			 * means translation processing itself.
+			 */
+			{
+				static bool probed;
+
+				if (!probed) {
+					unsigned long pend;
+
+					probed = true;
+					reinit_completion(&msm_host->dma_comp);
+					msm_dsi_manager_cmd_xfer_trigger(
+						msm_host->id, 0xfe000000, 4);
+					pend = wait_for_completion_timeout(
+						&msm_host->dma_comp,
+						msecs_to_jiffies(200));
+					pr_err("%s: imem probe fetch: %s (status0=0x%x intr=0x%x)\n",
+					       __func__,
+					       pend ? "COMPLETED" : "hung",
+					       dsi_read(msm_host, REG_DSI_STATUS0),
+					       dsi_read(msm_host, REG_DSI_INTR_CTRL));
+				}
 			}
 			ret = -ETIMEDOUT;
 		}
