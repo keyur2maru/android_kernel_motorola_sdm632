@@ -474,6 +474,15 @@ static struct device *msm_smmu_device_create(struct device *dev,
 	return &pdev->dev;
 }
 
+struct iommu_domain *msm_smmu_get_domain(struct msm_mmu *mmu)
+{
+	struct msm_smmu *smmu = to_msm_smmu(mmu);
+	struct msm_smmu_client *client = msm_smmu_to_client(smmu);
+
+	return client && client->mmu_mapping ?
+		client->mmu_mapping->domain : NULL;
+}
+
 struct msm_mmu *msm_smmu_new(struct device *dev,
 		enum msm_mmu_domain_type domain)
 {

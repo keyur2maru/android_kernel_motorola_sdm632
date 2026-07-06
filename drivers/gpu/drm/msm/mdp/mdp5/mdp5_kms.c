@@ -608,65 +608,48 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	mdp5_disable(mdp5_kms);
 	mdelay(16);
 
-	if (config->platform.iommu) {
-		int stall_disable = 1;
-
-		/* Terminate faulted transactions instead of stalling them:
-		 * a stalled fault whose context interrupt is never serviced
-		 * parks the TBU and every later MDSS read (DSI command
-		 * fetch, scanout) queues behind it forever.  Observed live:
-		 * CB FSR=0x400 latched on iova 0 while the first command
-		 * fetch hung.  The downstream SDE KMS sets the same
-		 * attribute on its display domains.
+	{
+		/* Route the KMS address space through the downstream SDE smmu
+		 * client instead of a raw msm_iommu attach: it creates the
+		 * ARM DMA-IOMMU mapping with the qcom upstream-hint walk
+		 * attribute set before attach, attaches this device through
+		 * arm_iommu_attach_device(), and maps gem objects with
+		 * dma_map_sg() so the mapping path carries the cache
+		 * maintenance and attach ordering the raw path lacked.
 		 */
-		iommu_domain_set_attr(config->platform.iommu,
-				      DOMAIN_ATTR_CB_STALL_DISABLE,
-				      &stall_disable);
+		struct msm_mmu *mmu = msm_smmu_new(&pdev->dev,
+						   MSM_SMMU_DOMAIN_UNSECURE);
 
-		/*
-		 * Use the mainline msm_iommu address space (msm_iommu_aspace_ops:
-		 * drm_mm iova allocation + msm_iommu_map), NOT the SDE
-		 * msm_gem_smmu_address_space_create().  The SDE smmu_aspace_map_vma
-		 * op calls aspace->mmu->funcs->map_sg(), which msm_iommu_new()'s mmu
-		 * does not implement (only ->map), so mapping the DSI TX buffer did
-		 * "blr NULL" -> PC=0 oops (and never allocated an iova, hence the
-		 * spurious SMMU faults).  msm_gem_address_space_create() builds the
-		 * msm_iommu mmu internally and installs the matching ops.
-		 */
-		aspace = msm_gem_address_space_create(&pdev->dev,
-				config->platform.iommu, "mdp5");
-		if (IS_ERR(aspace)) {
-			ret = PTR_ERR(aspace);
-			dev_err(&pdev->dev, "failed to init iommu: %d\n", ret);
-			iommu_domain_free(config->platform.iommu);
-			goto fail;
+		if (IS_ERR(mmu)) {
+			dev_err(&pdev->dev, "smmu client failed: %ld\n",
+				PTR_ERR(mmu));
+			aspace = NULL;
+		} else {
+			aspace = msm_gem_smmu_address_space_create(dev, mmu,
+								   "mdp5");
+			if (IS_ERR(aspace)) {
+				ret = PTR_ERR(aspace);
+				dev_err(&pdev->dev,
+					"failed to create smmu aspace: %d\n",
+					ret);
+				goto fail;
+			}
+
+			mdp5_kms->aspace = aspace;
+
+			mdp5_enable(mdp5_kms);
+			ret = mmu->funcs->attach(mmu, iommu_ports,
+					ARRAY_SIZE(iommu_ports));
+			mdp5_disable(mdp5_kms);
+			if (ret) {
+				dev_err(&pdev->dev,
+					"failed to attach smmu client: %d\n",
+					ret);
+				goto fail;
+			}
+
+			aspace->domain_attached = true;
 		}
-
-		mdp5_kms->aspace = aspace;
-
-		/* smmu_v2 requires the client power/clocks voted before any
-		 * smmu usage: the TBU serving the MDSS masters sits in the
-		 * MDSS clock domain, and an attach performed with those
-		 * clocks off leaves the TBU micro-TLB holding the
-		 * bootloader's passthrough entries - translated reads then
-		 * resolve through stale entries onto raw bus addresses and
-		 * stall.  The downstream client calls
-		 * mdss_smmu_enable_power() before arm_iommu_attach_device()
-		 * for the same reason.
-		 */
-		mdp5_enable(mdp5_kms);
-		ret = aspace->mmu->funcs->attach(aspace->mmu, iommu_ports,
-				ARRAY_SIZE(iommu_ports));
-		mdp5_disable(mdp5_kms);
-		if (ret) {
-			dev_err(&pdev->dev, "failed to attach iommu: %d\n",
-				ret);
-			goto fail;
-		}
-	} else {
-		dev_info(&pdev->dev,
-			 "no iommu, fallback to phys contig buffers for scanout\n");
-		aspace = NULL;
 	}
 
 	kms->aspace = aspace;

@@ -68,6 +68,7 @@ static inline void msm_mmu_init(struct msm_mmu *mmu, struct device *dev,
 
 struct msm_mmu *msm_iommu_new(struct device *dev, struct iommu_domain *domain);
 struct iommu_domain *msm_iommu_get_domain(struct msm_mmu *mmu);
+struct iommu_domain *msm_smmu_get_domain(struct msm_mmu *mmu);
 struct msm_mmu *msm_smmu_new(struct device *dev,
 	enum msm_mmu_domain_type domain);
 

@@ -1127,11 +1127,15 @@ static int dsi_tx_buf_alloc(struct msm_dsi_host *msm_host, int size)
 		 * non-DRAM target to separate a translation failure from a
 		 * dead DRAM path.
 		 */
-		ret = iommu_map(msm_iommu_get_domain(priv->kms->aspace->mmu),
+		if (msm_smmu_get_domain(priv->kms->aspace->mmu)) {
+			ret = iommu_map(
+				msm_smmu_get_domain(priv->kms->aspace->mmu),
 				0xfe000000, 0x08600000, SZ_4K, IOMMU_READ);
-		if (ret)
-			pr_err("%s: imem probe map failed: %d\n", __func__,
-			       ret);
+			if (ret)
+				pr_err("%s: imem probe map failed: %d\n",
+				       __func__, ret);
+			ret = 0;
+		}
 	} else {
 		msm_host->tx_buf = dma_alloc_coherent(dev->dev, size,
 					&msm_host->tx_buf_paddr, GFP_KERNEL);
@@ -1396,7 +1400,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					msm_host->dev->dev_private;
 
 				arm_smmu_debug_dump_domain(
-					msm_iommu_get_domain(
+					msm_smmu_get_domain(
 						p2->kms->aspace->mmu));
 
 				/* SW pagetable walk vs the SMMU's own ATOS
@@ -1408,11 +1412,11 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				pr_err("%s: sw_phys=%pa hard_phys=%pa\n",
 				       __func__,
 				       &(phys_addr_t){ iommu_iova_to_phys(
-					msm_iommu_get_domain(
+					msm_smmu_get_domain(
 						p2->kms->aspace->mmu),
 					dma_base) },
 				       &(phys_addr_t){ iommu_iova_to_phys_hard(
-					msm_iommu_get_domain(
+					msm_smmu_get_domain(
 						p2->kms->aspace->mmu),
 					dma_base) });
 			}
@@ -1436,7 +1440,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 					probed = true;
 					arm_smmu_debug_clean_pgtables(
-						msm_iommu_get_domain(
+						msm_smmu_get_domain(
 						  p3->kms->aspace->mmu),
 						dma_base);
 					reinit_completion(&msm_host->dma_comp);
