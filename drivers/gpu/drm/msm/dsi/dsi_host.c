@@ -2453,6 +2453,36 @@ int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 	dsi_sw_reset(msm_host);
 	dsi_ctrl_config(msm_host, true, phy_shared_timings);
 
+	/*
+	 * Re-sync the command engine with the PHY before the first DCS
+	 * command.  The bootloader lights a splash on this DSI panel and hands
+	 * the controller/PHY over in an indeterminate state; the sw reset
+	 * above runs before dsi_ctrl_config(), so the command/DMA engine is
+	 * left enabled and configured after the last reset and its internal
+	 * state machine is never flushed against the now-running link clocks
+	 * and freshly-enabled PHY.  On a clean handoff the first LP init
+	 * command clocks out anyway, but on a dirty splash handoff the command
+	 * engine and the PHY LP-escape state machine are desynced: the command
+	 * DMA is triggered (STATUS0 CMD_MODE_DMA_BUSY) but the data lanes never
+	 * leave LP-11 stop to perform the escape transfer, so the command hangs
+	 * to the 200ms timeout and panel init fails with -110.
+	 *
+	 * The known-good downstream host does the reset the other way round:
+	 * it sets up and enables the controller and turns the link clocks on,
+	 * then issues a controller soft reset as the last step before the panel
+	 * init commands (dsi_display_soft_reset() -> dsi_ctrl_soft_reset() ->
+	 * dsi_ctrl_hw_cmn_soft_reset(), called right before dsi_panel_prepare()
+	 * in dsi_display.c).  Mirror that: reset the already-configured,
+	 * enabled controller here, after dsi_ctrl_config() and before the init
+	 * commands.  dsi_sw_reset_restore() has the same shape as the
+	 * downstream soft reset - it disables the controller, force-enables the
+	 * clocks, pulses REG_DSI_RESET and restores REG_DSI_CTRL - so it flushes
+	 * the command/DMA engine and FIFOs while preserving the just-written
+	 * LANE_CTRL / CMD_DMA_CTRL(LP) / TRIG_CTRL config.  Every boot now
+	 * starts the first command from a clean, PHY-synced engine state.
+	 */
+	dsi_sw_reset_restore(msm_host);
+
 	if (msm_host->disp_en_gpio)
 		gpiod_set_value(msm_host->disp_en_gpio, 1);
 
