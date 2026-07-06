@@ -1398,6 +1398,23 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				arm_smmu_debug_dump_domain(
 					msm_iommu_get_domain(
 						p2->kms->aspace->mmu));
+
+				/* SW pagetable walk vs the SMMU's own ATOS
+				 * translation of the hung fetch address: a
+				 * correct ATOS result with a hung client
+				 * fetch pins the failure to the client
+				 * transaction forwarding, not translation.
+				 */
+				pr_err("%s: sw_phys=%pa hard_phys=%pa\n",
+				       __func__,
+				       &(phys_addr_t){ iommu_iova_to_phys(
+					msm_iommu_get_domain(
+						p2->kms->aspace->mmu),
+					dma_base) },
+				       &(phys_addr_t){ iommu_iova_to_phys_hard(
+					msm_iommu_get_domain(
+						p2->kms->aspace->mmu),
+					dma_base) });
 			}
 
 			/* One-shot probe: retry the DMA from the imem
