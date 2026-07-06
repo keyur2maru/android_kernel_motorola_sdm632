@@ -882,42 +882,31 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	dsi_write(msm_host, REG_DSI_LANE_SWAP_CTRL,
 		  DSI_LANE_SWAP_CTRL_DLN_SWAP_SEL(msm_host->dlane_swap));
 
-	/*
-	 * Force the clock lane into HS for both continuous- and
-	 * non-continuous-clock panels.
-	 *
-	 * Mainline only writes CLKLN_HS_FORCE_REQUEST for continuous-clock
-	 * panels and leaves LANE_CTRL untouched for non-continuous ones,
-	 * relying on the PHY to auto-request clock-lane HS whenever the video
-	 * engine or a HS command has data to send.  On this board that does
-	 * not happen:
-	 *
-	 *  - The bootloader lights a splash on this DSI panel and hands the
-	 *    controller off with stale bits latched in LANE_CTRL (ULPS request
-	 *    / clamp / clk-lane state), which held the data lanes out of stop
-	 *    state so even the LP escape init commands never clocked out
-	 *    (STATUS0 stuck CMD_MODE_DMA_BUSY, no error).  Writing a single
-	 *    known bit (rather than leaving the register dirty) clears that
-	 *    latched garbage - the downstream host does the same at setup
-	 *    (mdss_dsi_host.c "Reset DSI_LANE_CTRL").
-	 *
-	 *  - The 14nm PHY here does NOT auto-engage the clock lane for HS after
-	 *    VID_MODE_EN: LANE_STATUS reads the clock lane stopped (bit4 set,
-	 *    LP-11) during active video, so no HS byte clock is produced and no
-	 *    HS traffic - neither the pixel stream nor a HS DCS write - ever
-	 *    reaches the panel (LP escape still works on the escape clock, so
-	 *    panel init succeeds but the glass stays uniform black).
-	 *
-	 * The DJN-569 is flagged MIPI_DSI_CLOCK_NON_CONTINUOUS, but the
-	 * downstream driver that lights it does not set force-clock-lane-hs
-	 * either - it depends on the same auto clock-lane HS we lack.  Forcing a
-	 * continuous HS clock is safe: the panel accepts it and the video
-	 * engine's BLLP power-stop config still lets the data lanes drop to LP
-	 * during blanking.  This single clean write both releases the splash-
-	 * latched lanes (former non-continuous fix) and provides the HS clock.
-	 */
-	dsi_write(msm_host, REG_DSI_LANE_CTRL,
-		DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+	if (!(flags & MIPI_DSI_CLOCK_NON_CONTINUOUS))
+		dsi_write(msm_host, REG_DSI_LANE_CTRL,
+			DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+	else
+		/*
+		 * Non-continuous-clock panels need the data lanes to start each
+		 * LP escape command transfer from a clean LP-11 state.  The
+		 * bootloader lights a splash on this DSI panel and hands the
+		 * controller off with stale bits latched in LANE_CTRL (ULPS
+		 * request / clamp / clk-lane HS force); mainline only ever writes
+		 * LANE_CTRL on the continuous-clock path, so on this board it is
+		 * left dirty and the data lanes never leave stop state - the
+		 * command DMA is triggered but no packet clocks out (STATUS0 stays
+		 * CMD_MODE_DMA_BUSY, no error).  The downstream host clears it
+		 * unconditionally at controller setup (mdss_dsi_host.c "Reset
+		 * DSI_LANE_CTRL"); mirror that so the lanes are released.
+		 *
+		 * Do NOT force the clock lane HS here: on this 14nm PHY a forced
+		 * HS clock blocks the data lanes from entering LP escape, so the
+		 * LP init commands stall (device #225: forcing HS at this point
+		 * made the first init command time out).  The clock lane is
+		 * force-requested HS later, at video-engine start
+		 * (dsi_op_mode_config), once the LP init sequence has completed.
+		 */
+		dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);
 
 	data |= DSI_CTRL_ENABLE;
 
@@ -1000,6 +989,30 @@ static void dsi_op_mode_config(struct msm_dsi_host *msm_host,
 	} else {
 		if (video_mode) {
 			dsi_ctrl |= DSI_CTRL_VID_MODE_EN;
+
+			/*
+			 * Force the clock lane into HS for the video session.
+			 *
+			 * This runs at video-engine start (msm_dsi_host_enable),
+			 * AFTER the LP init command sequence (drm_panel_prepare) has
+			 * completed - which is the whole point of doing it here and
+			 * not in dsi_ctrl_config().  On this 14nm PHY a forced HS
+			 * clock blocks the data lanes from entering LP escape, so if
+			 * the clock lane is forced HS before the init commands run
+			 * they stall (device #225).  But the PHY also does NOT
+			 * auto-engage the clock lane for HS when the video engine
+			 * starts (device #223/#225: LANE_STATUS clock-lane stop bit4
+			 * stays set after VID_MODE_EN), so with no HS byte clock the
+			 * active-video pixel stream never reaches the panel and the
+			 * glass is uniform black.  Requesting clock-lane HS here - the
+			 * same bit mainline uses for continuous-clock panels, but
+			 * deferred past LP init - gives working LP init AND a HS clock
+			 * for the pixel stream.  Read-modify-write to preserve the
+			 * lane bits dsi_ctrl_config() already cleared.
+			 */
+			dsi_write(msm_host, REG_DSI_LANE_CTRL,
+				dsi_read(msm_host, REG_DSI_LANE_CTRL) |
+				DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
 		} else {		/* command mode */
 			dsi_ctrl |= DSI_CTRL_CMD_MODE_EN;
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_MDP_DONE, 1);
