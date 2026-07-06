@@ -612,6 +612,70 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	mdp5_disable(mdp5_kms);
 	mdelay(16);
 
+	/* Hold the three downstream mdss_mdp bus votes for the whole
+	 * session, registered before the TZ secure-config restore and the
+	 * iommu attach below: the MDP->EBI data path (mdss_mdp), the
+	 * hw-rt minimum vote the downstream driver holds while the SMMU
+	 * is attached and during early TZ operations (mdss_hw_rt), and
+	 * the register-path vote (mdss_reg).  With no vote the NOC
+	 * releases the MDSS master path once the bus driver clears the
+	 * bootloader's vote and every translated read stalls.
+	 */
+	{
+		struct msm_bus_scale_pdata *bus_pdata;
+		struct device_node *node;
+		u32 bus_hdl;
+
+		bus_pdata = msm_bus_cl_get_pdata(pdev);
+		if (bus_pdata) {
+			bus_hdl = msm_bus_scale_register_client(bus_pdata);
+			if (bus_hdl) {
+				msm_bus_scale_client_update_request(bus_hdl, 1);
+				dev_info(&pdev->dev, "mdss bus bandwidth voted\n");
+			} else {
+				dev_warn(&pdev->dev, "mdss bus client registration failed\n");
+			}
+		} else {
+			dev_warn(&pdev->dev, "no mdss bus scale pdata\n");
+		}
+
+		node = of_get_child_by_name(pdev->dev.of_node,
+					    "qcom,mdss-hw-rt-bus");
+		if (node) {
+			bus_pdata = msm_bus_pdata_from_node(pdev, node);
+			of_node_put(node);
+			if (!IS_ERR_OR_NULL(bus_pdata)) {
+				bus_hdl = msm_bus_scale_register_client(bus_pdata);
+				if (bus_hdl) {
+					msm_bus_scale_client_update_request(bus_hdl, 1);
+					dev_info(&pdev->dev, "mdss hw-rt bus voted\n");
+				} else {
+					dev_warn(&pdev->dev, "hw-rt bus client registration failed\n");
+				}
+			}
+		} else {
+			dev_warn(&pdev->dev, "no mdss-hw-rt-bus node\n");
+		}
+
+		node = of_get_child_by_name(pdev->dev.of_node,
+					    "qcom,mdss-reg-bus");
+		if (node) {
+			bus_pdata = msm_bus_pdata_from_node(pdev, node);
+			of_node_put(node);
+			if (!IS_ERR_OR_NULL(bus_pdata)) {
+				bus_hdl = msm_bus_scale_register_client(bus_pdata);
+				if (bus_hdl) {
+					msm_bus_scale_client_update_request(bus_hdl, 1);
+					dev_info(&pdev->dev, "mdss reg bus voted\n");
+				} else {
+					dev_warn(&pdev->dev, "reg bus client registration failed\n");
+				}
+			}
+		} else {
+			dev_warn(&pdev->dev, "no mdss-reg-bus node\n");
+		}
+	}
+
 	{
 		/* Route the KMS address space through the downstream SDE smmu
 		 * client instead of a raw msm_iommu attach: it creates the
@@ -707,29 +771,6 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 			wmb();
 			mdp5_disable(mdp5_kms);
 			iounmap(vbif);
-		}
-	}
-
-	/* Hold the downstream mdss_mdp MDP->EBI bandwidth vote for the
-	 * whole session: with no vote the NOC releases the MDSS master
-	 * path once the bus driver clears the bootloader's vote, and every
-	 * translated read from the DSI command fetch or scanout stalls.
-	 */
-	{
-		struct msm_bus_scale_pdata *bus_pdata;
-		u32 bus_hdl;
-
-		bus_pdata = msm_bus_cl_get_pdata(pdev);
-		if (bus_pdata) {
-			bus_hdl = msm_bus_scale_register_client(bus_pdata);
-			if (bus_hdl) {
-				msm_bus_scale_client_update_request(bus_hdl, 1);
-				dev_info(&pdev->dev, "mdss bus bandwidth voted\n");
-			} else {
-				dev_warn(&pdev->dev, "mdss bus client registration failed\n");
-			}
-		} else {
-			dev_warn(&pdev->dev, "no mdss bus scale pdata\n");
 		}
 	}
 
