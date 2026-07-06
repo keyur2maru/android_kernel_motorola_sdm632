@@ -113,11 +113,23 @@ static int dsi_14nm_phy_enable(struct msm_dsi_phy *phy, int src_pll_id,
 				REG_DSI_14nm_PHY_CMN_GLBL_TEST_CTRL,
 				DSI_14nm_PHY_CMN_GLBL_TEST_CTRL_BITCLK_HS_SEL);
 
-	ret = msm_dsi_pll_set_usecase(phy->pll, phy->usecase);
-	if (ret) {
-		dev_err(&phy->pdev->dev, "%s: set pll usecase failed, %d\n",
-			__func__, ret);
-		return ret;
+	/*
+	 * The usecase (STANDALONE/MASTER/SLAVE) only steers the drm/msm DSI
+	 * PLL's source select.  This board clocks the DSI byte/pixel path from
+	 * the downstream MSM_MDSS_PLL instead, so CONFIG_DRM_MSM_DSI_PLL is off:
+	 * msm_dsi_pll_init() handed back ERR_PTR(-ENODEV) and
+	 * msm_dsi_pll_set_usecase() is the -ENODEV stub.  Treating that as fatal
+	 * killed PHY enable (-> no DSI clock -> no vblank).  Only program the
+	 * usecase when a real drm PLL is present; otherwise it is not applicable.
+	 */
+	if (!IS_ERR_OR_NULL(phy->pll)) {
+		ret = msm_dsi_pll_set_usecase(phy->pll, phy->usecase);
+		if (ret) {
+			dev_err(&phy->pdev->dev,
+				"%s: set pll usecase failed, %d\n",
+				__func__, ret);
+			return ret;
+		}
 	}
 
 	/* Remove power down from PLL and all lanes */
