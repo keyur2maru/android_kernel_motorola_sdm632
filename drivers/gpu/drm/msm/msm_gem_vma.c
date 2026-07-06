@@ -271,6 +271,17 @@ msm_gem_address_space_new(struct msm_mmu *mmu, const char *name,
 	if (!local)
 		return ERR_PTR(-ENOMEM);
 
+	/*
+	 * Never hand out IOVA 0.  The first drm_mm allocation lands at the
+	 * range base, and arm-smmu leaves domain->geometry.aperture_start at 0
+	 * (only aperture_end is set), so without this the first mapped buffer
+	 * gets iova 0.  Engines that take a buffer address in a register -- the
+	 * DSI command DMA writes it to REG_DSI_DMA_BASE -- treat 0 as "no
+	 * buffer" and stall.  Reserve the first page so the base is >= PAGE_SIZE,
+	 * matching mainline mdp5 which passes va_start=0x1000 to this allocator.
+	 */
+	start = max_t(u64, start, PAGE_SIZE);
+
 	drm_mm_init(&local->mm, (start >> PAGE_SHIFT),
 		(end >> PAGE_SHIFT) - 1);
 
