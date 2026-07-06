@@ -21,8 +21,12 @@
 #include "msm_drv.h"
 #include "msm_gem.h"
 #include <linux/msm-bus.h>
+#include <soc/qcom/scm.h>
 #include "msm_mmu.h"
 #include "mdp5_kms.h"
+
+/* scm_restore_sec_cfg device id for the MDSS block (mdss_mdp.c) */
+#define SEC_DEVICE_MDSS		1
 
 static const char *iommu_ports[] = {
 		"mdp_0",
@@ -638,6 +642,31 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 			mdp5_kms->aspace = aspace;
 
 			mdp5_enable(mdp5_kms);
+
+			/* The apps SMMU is TZ-owned (qcom,enable-static-cb):
+			 * the context bank the display stream maps to keeps
+			 * the bootloader's secure configuration, whose CBAR
+			 * VMID is not HLOS, so the XPU drops every translated
+			 * fetch without raising a fault.  TZ must be asked to
+			 * restore the MDSS secure configuration before HLOS
+			 * translations can complete; the downstream driver
+			 * issues this at probe (mdss_mdp.c,
+			 * __mdss_restore_sec_cfg) with the MDSS clocks held.
+			 */
+			{
+				int scm_ret = 0;
+
+				ret = scm_restore_sec_cfg(SEC_DEVICE_MDSS, 0,
+							  &scm_ret);
+				if (ret || scm_ret)
+					dev_err(&pdev->dev,
+						"mdss restore_sec_cfg failed: %d %d\n",
+						ret, scm_ret);
+				else
+					dev_info(&pdev->dev,
+						 "mdss secure config restored\n");
+			}
+
 			ret = mmu->funcs->attach(mmu, iommu_ports,
 					ARRAY_SIZE(iommu_ports));
 			mdp5_disable(mdp5_kms);
