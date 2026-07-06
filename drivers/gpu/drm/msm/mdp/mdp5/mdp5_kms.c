@@ -20,6 +20,7 @@
 
 #include "msm_drv.h"
 #include "msm_gem.h"
+#include <linux/msm-bus.h>
 #include "msm_mmu.h"
 #include "mdp5_kms.h"
 
@@ -643,6 +644,29 @@ struct msm_kms *mdp5_kms_init(struct drm_device *dev)
 	}
 
 	kms->aspace = aspace;
+
+	/* Hold the downstream mdss_mdp MDP->EBI bandwidth vote for the
+	 * whole session: with no vote the NOC releases the MDSS master
+	 * path once the bus driver clears the bootloader's vote, and every
+	 * translated read from the DSI command fetch or scanout stalls.
+	 */
+	{
+		struct msm_bus_scale_pdata *bus_pdata;
+		u32 bus_hdl;
+
+		bus_pdata = msm_bus_cl_get_pdata(pdev);
+		if (bus_pdata) {
+			bus_hdl = msm_bus_scale_register_client(bus_pdata);
+			if (bus_hdl) {
+				msm_bus_scale_client_update_request(bus_hdl, 1);
+				dev_info(&pdev->dev, "mdss bus bandwidth voted\n");
+			} else {
+				dev_warn(&pdev->dev, "mdss bus client registration failed\n");
+			}
+		} else {
+			dev_warn(&pdev->dev, "no mdss bus scale pdata\n");
+		}
+	}
 
 	ret = modeset_init(mdp5_kms);
 	if (ret) {
