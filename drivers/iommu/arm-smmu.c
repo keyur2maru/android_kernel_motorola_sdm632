@@ -5923,5 +5923,12 @@ void arm_smmu_debug_clean_pgtables(struct iommu_domain *domain,
 			break;
 		tbl = desc & GENMASK_ULL(47, 12);
 	}
+
+	/* Drop any cached walk state so the retry re-reads the tables */
+	if (!arm_smmu_power_on(smmu_domain->smmu->pwr)) {
+		arm_smmu_tlb_inv_context(smmu_domain);
+		arm_smmu_power_off(smmu_domain->smmu->pwr);
+		pr_err("arm-smmu clean: tlb invalidated\n");
+	}
 }
 EXPORT_SYMBOL(arm_smmu_debug_clean_pgtables);
