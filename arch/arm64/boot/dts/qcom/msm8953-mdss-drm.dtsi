@@ -153,6 +153,17 @@
 				compatible = "mot,djn-569-hd-vid";
 				reg = <0>;
 
+				/* TDDI logic + LCDB glass bias, as on the
+				 * downstream mdss_dsi0 node (vddio_disp/
+				 * vsp_disp/vsn_disp).  Holding a reference
+				 * also keeps the regulator late cleanup from
+				 * switching the bootloader-enabled bias off
+				 * mid-boot.
+				 */
+				vddio-supply = <&pm8953_l6>;
+				vsp-supply = <&lcdb_ldo_vreg>;
+				vsn-supply = <&lcdb_ncp_vreg>;
+
 				/* reset: tlmm gpio61, active low */
 				reset-gpios = <&tlmm 61 1>;
 				/* backlight enable: pm8953 gpio4 */

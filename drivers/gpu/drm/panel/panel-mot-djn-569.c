@@ -17,6 +17,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/regulator/consumer.h>
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
@@ -27,6 +28,7 @@ struct djn_569 {
 	struct drm_panel panel;
 	struct mipi_dsi_device *dsi;
 	struct backlight_device *backlight;
+	struct regulator_bulk_data supplies[3];
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *bklt_en_gpio;
 	struct gpio_desc *hbm_gpio;
@@ -187,6 +189,8 @@ static int djn_569_unprepare(struct drm_panel *panel)
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 0);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
+	regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+
 	ctx->prepared = false;
 
 	return 0;
@@ -200,12 +204,29 @@ static int djn_569_prepare(struct drm_panel *panel)
 	if (ctx->prepared)
 		return 0;
 
+	/*
+	 * vddio powers the TDDI logic; vsp/vsn are the LCDB +/-5.5V glass
+	 * bias rails.  The bootloader leaves them on for the splash, but
+	 * nothing held a reference, so the regulator late cleanup switched
+	 * the bias off ~30s after boot and the panel went permanently dark.
+	 * The downstream host enables vddio -> vsp -> vsn before the reset
+	 * pulse (lp11-lcdb-reset).
+	 */
+	ret = regulator_bulk_enable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+	if (ret < 0) {
+		dev_err(panel->dev, "failed to enable supplies: %d\n", ret);
+		return ret;
+	}
+	usleep_range(10000, 11000);
+
 	djn_569_reset(ctx);
 
 	ret = djn_569_on(ctx);
 	if (ret < 0) {
 		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
 		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies),
+				       ctx->supplies);
 		return ret;
 	}
 
@@ -324,6 +345,16 @@ static int djn_569_add(struct djn_569 *ctx)
 {
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
+
+	ctx->supplies[0].supply = "vddio";
+	ctx->supplies[1].supply = "vsp";
+	ctx->supplies[2].supply = "vsn";
+	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ctx->supplies),
+				      ctx->supplies);
+	if (ret < 0) {
+		dev_err(dev, "failed to get supplies: %d\n", ret);
+		return ret;
+	}
 
 	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->reset_gpio)) {
