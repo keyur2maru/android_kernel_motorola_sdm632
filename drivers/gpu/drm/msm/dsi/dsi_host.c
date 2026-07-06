@@ -885,6 +885,21 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	if (!(flags & MIPI_DSI_CLOCK_NON_CONTINUOUS))
 		dsi_write(msm_host, REG_DSI_LANE_CTRL,
 			DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+	else
+		/*
+		 * Non-continuous-clock panels need the data lanes to start each
+		 * LP escape command transfer from a clean LP-11 state.  The
+		 * bootloader lights a splash on this DSI panel and hands the
+		 * controller off with stale bits latched in LANE_CTRL (ULPS
+		 * request / clamp / clk-lane HS force); mainline only ever writes
+		 * LANE_CTRL on the continuous-clock path, so on this board it is
+		 * left dirty and the data lanes never leave stop state - the
+		 * command DMA is triggered but no packet clocks out (STATUS0 stays
+		 * CMD_MODE_DMA_BUSY, no error).  The downstream host clears it
+		 * unconditionally at controller setup (mdss_dsi_host.c "Reset
+		 * DSI_LANE_CTRL"); mirror that so the lanes are released.
+		 */
+		dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);
 
 	data |= DSI_CTRL_ENABLE;
 
