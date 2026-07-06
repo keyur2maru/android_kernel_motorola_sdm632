@@ -4012,19 +4012,6 @@ static int arm_smmu_alloc_cb(struct iommu_domain *domain,
 			cb = smmu->s2crs[idx].cbndx;
 	}
 
-	/* Debug experiment: steer the display stream (SID 0xc00) away from
-	 * the handoff bank 21 onto idle bank 18, whose TZ-owned CBAR
-	 * carries the same HLOS class as every working bank.  If the
-	 * command fetch completes there the hang is bank-specific TZ
-	 * state; if it still hangs on an HLOS bank the context bank is
-	 * exonerated entirely.
-	 */
-	if (cb == 21 && fwspec->num_ids &&
-	    (fwspec->ids[0] & 0xffff) == 0xc00) {
-		dev_info(smmu->dev, "display cb steer: 21 -> 18\n");
-		cb = 18;
-	}
-
 	if (cb >= 0 && arm_smmu_is_static_cb(smmu)) {
 		smmu_domain->slave_side_secure = true;
 
