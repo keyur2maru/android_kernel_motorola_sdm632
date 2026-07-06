@@ -19,6 +19,8 @@
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 
+#include <video/mipi_display.h>
+
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_mipi_dsi.h>
@@ -41,10 +43,37 @@ static inline struct djn_569 *to_djn_569(struct drm_panel *panel)
 	return container_of(panel, struct djn_569, panel);
 }
 
+/*
+ * The downstream command table sends every manufacturer/CMD2 register,
+ * including the 51/53/55 backlight block, as a generic LONG write
+ * (dtype 29) regardless of payload size.  mipi_dsi_generic_write()
+ * picks the generic SHORT type for 2-byte payloads, and this DDIC does
+ * not latch the registers from short packets.  Force the long type so
+ * the wire format matches the downstream stream byte for byte.
+ */
+static ssize_t djn_569_generic_long_write(struct mipi_dsi_device *dsi,
+					  const void *payload, size_t size)
+{
+	struct mipi_dsi_msg msg = {
+		.channel = dsi->channel,
+		.type = MIPI_DSI_GENERIC_LONG_WRITE,
+		.tx_buf = payload,
+		.tx_len = size,
+	};
+
+	if (!dsi->host->ops || !dsi->host->ops->transfer)
+		return -ENOSYS;
+
+	if (dsi->mode_flags & MIPI_DSI_MODE_LPM)
+		msg.flags |= MIPI_DSI_MSG_USE_LPM;
+
+	return dsi->host->ops->transfer(dsi->host, &msg);
+}
+
 #define dsi_generic_write_seq(dsi, seq...) do {				\
 		static const u8 d[] = { seq };				\
 		int ret;						\
-		ret = mipi_dsi_generic_write(dsi, d, ARRAY_SIZE(d));	\
+		ret = djn_569_generic_long_write(dsi, d, ARRAY_SIZE(d));\
 		if (ret < 0)						\
 			return ret;					\
 	} while (0)
@@ -228,6 +257,25 @@ static int djn_569_prepare(struct drm_panel *panel)
 		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies),
 				       ctx->supplies);
 		return ret;
+	}
+
+	/*
+	 * Read the power mode back so the log shows whether the panel
+	 * executed the init sequence (0x9c = sleep-out, display-on,
+	 * normal mode) or ignored it.  Write commands are fire-and-forget
+	 * on this link, so their completion proves nothing about the DDIC.
+	 */
+	{
+		u8 power_mode = 0;
+
+		ret = mipi_dsi_set_maximum_return_packet_size(ctx->dsi, 1);
+		if (!ret)
+			ret = mipi_dsi_dcs_read(ctx->dsi,
+						MIPI_DCS_GET_POWER_MODE,
+						&power_mode, 1);
+		dev_info(panel->dev, "power mode readback: ret=%d val=0x%02x\n",
+			 ret, power_mode);
+		ret = 0;
 	}
 
 	if (ctx->bklt_en_gpio)
