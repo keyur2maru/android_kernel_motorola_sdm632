@@ -1226,6 +1226,27 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		unsigned long jiffies_end = jiffies + msecs_to_jiffies(200);
 		unsigned long flags;
 		u32 status;
+		bool dma_kicked_off = false;
+		int i;
+
+		/*
+		 * Diagnostic: the SW trigger (REG_DSI_TRIG_DMA) was just
+		 * written by msm_dsi_host_cmd_xfer_commit(). Sample
+		 * CMD_MODE_DMA_BUSY right after so a boot-varying -ETIMEDOUT can
+		 * be classified: BUSY seen -> the DMA engine started and then
+		 * stalled (byte-clock/lane/PHY), BUSY never seen -> the trigger
+		 * did not start the DMA at all (command engine not ready). A
+		 * completing command latches BUSY within a few us, so the loop
+		 * breaks early and barely perturbs the working path.
+		 */
+		for (i = 0; i < 20; i++) {
+			if (dsi_read(msm_host, REG_DSI_STATUS0) &
+					DSI_STATUS0_CMD_MODE_DMA_BUSY) {
+				dma_kicked_off = true;
+				break;
+			}
+			udelay(5);
+		}
 
 		ret = 0;
 		do {
@@ -1264,7 +1285,23 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		} while (time_before(jiffies, jiffies_end));
 
 		if (ret == 0) {
-			DBG("dma tx timed out");
+			/*
+			 * Full command-engine snapshot on the failing command so
+			 * the next flash pins the failure mode without guessing:
+			 * ctrl (CMD_MODE_EN/ENABLE set?), status0 (engine/DMA
+			 * busy?), intr (DMA_DONE mask+latched status), the error
+			 * latches (fifo/ack_err/dln0_phy) and clk (PLL_UNLOCKED).
+			 */
+			pr_err("%s: DSI%d dma tx timeout: kicked_off=%d ctrl=0x%x status0=0x%x intr=0x%x fifo=0x%x ack_err=0x%x dln0=0x%x clk=0x%x base=0x%x len=%d\n",
+				__func__, msm_host->id, dma_kicked_off,
+				dsi_read(msm_host, REG_DSI_CTRL),
+				dsi_read(msm_host, REG_DSI_STATUS0),
+				dsi_read(msm_host, REG_DSI_INTR_CTRL),
+				dsi_read(msm_host, REG_DSI_FIFO_STATUS),
+				dsi_read(msm_host, REG_DSI_ACK_ERR_STATUS),
+				dsi_read(msm_host, REG_DSI_DLN0_PHY_ERR),
+				dsi_read(msm_host, REG_DSI_CLK_STATUS),
+				dma_base, len);
 			ret = -ETIMEDOUT;
 		}
 	} else
