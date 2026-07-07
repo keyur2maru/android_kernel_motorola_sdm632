@@ -896,7 +896,7 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	 * covered by any register dump, so it survived every readback
 	 * comparison while the write-stream trace showed it missing.
 	 */
-	dsi_write(msm_host, 0xbc, 0x3fd08);
+	dsi_write(msm_host, 0xbc - DSI_6G_REG_SHIFT, 0x3fd08);
 
 	/*
 	 * DSI_DMA_FIFO_CTRL (0x50): command DMA FIFO read watermark.  The
@@ -909,7 +909,7 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	 * Not covered by any register dump, so it survived every readback
 	 * comparison; the write-stream trace showed it missing.
 	 */
-	dsi_write(msm_host, 0x50, 0x30);
+	dsi_write(msm_host, 0x50 - DSI_6G_REG_SHIFT, 0x30);
 
 	/* allow only ack-err-status to generate interrupt */
 	dsi_write(msm_host, REG_DSI_ERR_INT_MASK0, 0x13ff3fe0);
