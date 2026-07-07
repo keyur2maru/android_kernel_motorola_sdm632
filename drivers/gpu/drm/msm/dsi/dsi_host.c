@@ -1304,33 +1304,31 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	}
 
 	/*
-	 * One-shot coherent-config probe over an idle link (first command only).
+	 * One-shot full-register dump in the command-ready idle state (first
+	 * command only).
 	 *
-	 * Earlier probes mixed incoherent settings (clock lane forced HS while
-	 * sending an LP command, or an HS command with the clock lane left in LP),
-	 * and all hung.  Test the two legitimate ways to send a command, both over
-	 * an idled link (stop INTF + drop VID_MODE_EN + dsi_sw_reset so the data
-	 * lanes reach LP-11 stop):
-	 *   config HS: force the clock lane HS (LANE_CTRL CLKLN_HS_FORCE_REQUEST)
-	 *              and send an HS command (CMD_DMA_CTRL without LOW_POWER) -
-	 *              mirrors the downstream mdss_dsi_start_hs_clk_lane path.
-	 *   config LP: leave the clock lane in LP (LANE_CTRL=0) and send an LP
-	 *              escape command (CMD_DMA_CTRL LOW_POWER) - the self-clocked
-	 *              escape path used by command-mode panels.
-	 * Both check the data-lane stop state (LANE_STATUS & 0xf == 0xf) and log
-	 * the result; whichever COMPLETES is the working transmit path.
+	 * Command DMA hangs with the bytes queued in the FIFO and every lane in the
+	 * correct stop state (0x1f1f), in both LP and HS - so the fault is not the
+	 * link state but the command-engine transmit config.  Idle the link (stop
+	 * INTF + drop VID_MODE_EN + dsi_sw_reset), set up an LP command exactly as
+	 * the normal path would, dump the whole DSI0 register block, then trigger
+	 * and report.  The dump is diffed offline against the working downstream
+	 * DSI0 dump (groundtruth-los-recovery/vg-dump.log) to find the command-
+	 * engine register that differs.
 	 */
 	{
-		static bool cfg_probed;
+		static bool dump_probed;
 
-		if (!cfg_probed) {
+		if (!dump_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
+			void __iomem *d = ioremap(0x01a94000, 0x120);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			int cfg;
+			unsigned long jend;
+			u32 ls, st, fifo;
+			int done = 0, off;
 
-			cfg_probed = true;
+			dump_probed = true;
 
-			/* idle the link once */
 			if (intf) {
 				writel_relaxed(0, intf + 0x0);
 				wmb();
@@ -1342,73 +1340,62 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			wmb();
 			msleep(20);
 
-			for (cfg = 0; cfg < 2; cfg++) {
-				bool hs = (cfg == 0);
-				unsigned long jend;
-				u32 ls, st, fifo;
-				int done = 0, stopped;
+			dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);	/* LP escape */
+			wmb();
+			usleep_range(1000, 1100);
+			ls = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
 
-				dsi_sw_reset(msm_host);		/* flush previous attempt */
-				wmb();
-				msleep(5);
-
-				dsi_write(msm_host, REG_DSI_LANE_CTRL,
-					  hs ? DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST : 0);
-				wmb();
-				usleep_range(1000, 1100);
-
-				ls = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
-				stopped = ((ls & 0xf) == 0xf);	/* data lanes in stop */
-
-				dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
-					  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
-					  (hs ? 0 : DSI_CMD_DMA_CTRL_LOW_POWER));
-				wmb();
-
-				reinit_completion(&msm_host->dma_comp);
-				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
-				dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
-				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-				wmb();
-
-				jend = jiffies + msecs_to_jiffies(200);
-				do {
-					unsigned long flags;
-					u32 istat;
-
-					if (wait_for_completion_timeout(&msm_host->dma_comp,
-							msecs_to_jiffies(2)) > 0) {
-						done = 1;
-						break;
-					}
-					spin_lock_irqsave(&msm_host->intr_lock, flags);
-					istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
-					if (istat & DSI_IRQ_CMD_DMA_DONE)
-						dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
-					spin_unlock_irqrestore(&msm_host->intr_lock, flags);
-					if (istat & DSI_IRQ_CMD_DMA_DONE) {
-						done = 1;
-						break;
-					}
-				} while (time_before(jiffies, jend));
-
-				st = dsi_read(msm_host, REG_DSI_STATUS0);
-				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-				pr_err("%s: CFG PROBE[%s]: %s lane_status=0x%x stopped=%d status0=0x%x fifo=0x%x\n",
-				       __func__, hs ? "HS-clkforce" : "LP-noforce",
-				       done ? "COMPLETED" : "hung",
-				       ls, stopped, st, fifo);
-
-				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
-				dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);
-				wmb();
-			}
-
-			/* restore the video pipeline */
 			dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
 				  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
 				  DSI_CMD_DMA_CTRL_LOW_POWER);
+			wmb();
+
+			reinit_completion(&msm_host->dma_comp);
+			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
+			dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
+			dsi_write(msm_host, REG_DSI_DMA_LEN, len);
+			wmb();
+
+			/* full DSI0 register dump in the command-ready state, before
+			 * the trigger, matching the stock dump's raw-offset format */
+			for (off = 0; d && off < 0x120; off += 16)
+				pr_err("DSI0DUMP +0x%03x: %08x %08x %08x %08x\n",
+				       off,
+				       readl_relaxed(d + off),
+				       readl_relaxed(d + off + 4),
+				       readl_relaxed(d + off + 8),
+				       readl_relaxed(d + off + 12));
+
+			dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
+			wmb();
+
+			jend = jiffies + msecs_to_jiffies(200);
+			do {
+				unsigned long flags;
+				u32 istat;
+
+				if (wait_for_completion_timeout(&msm_host->dma_comp,
+						msecs_to_jiffies(2)) > 0) {
+					done = 1;
+					break;
+				}
+				spin_lock_irqsave(&msm_host->intr_lock, flags);
+				istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
+				if (istat & DSI_IRQ_CMD_DMA_DONE)
+					dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
+				spin_unlock_irqrestore(&msm_host->intr_lock, flags);
+				if (istat & DSI_IRQ_CMD_DMA_DONE) {
+					done = 1;
+					break;
+				}
+			} while (time_before(jiffies, jend));
+
+			st = dsi_read(msm_host, REG_DSI_STATUS0);
+			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
+			pr_err("%s: DUMP PROBE: %s lane_status=0x%x status0=0x%x fifo=0x%x\n",
+			       __func__, done ? "COMPLETED" : "hung", ls, st, fifo);
+
+			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
 			dsi_sw_reset_restore(msm_host);
@@ -1417,6 +1404,8 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				wmb();
 				iounmap(intf);
 			}
+			if (d)
+				iounmap(d);
 			msleep(20);
 		}
 	}
