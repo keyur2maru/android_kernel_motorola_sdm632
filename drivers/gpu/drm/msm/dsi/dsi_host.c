@@ -1043,14 +1043,21 @@ static void dsi_set_tx_power_mode(int mode, struct msm_dsi_host *msm_host)
 
 static void dsi_wait4video_done(struct msm_dsi_host *msm_host)
 {
+	unsigned long t;
+
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_VIDEO_DONE, 1);
 
 	reinit_completion(&msm_host->video_comp);
 
-	wait_for_completion_timeout(&msm_host->video_comp,
+	t = wait_for_completion_timeout(&msm_host->video_comp,
 			msecs_to_jiffies(70));
 
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_VIDEO_DONE, 0);
+
+	pr_err("%s: video done %s (status0=0x%x intr=0x%x)\n", __func__,
+	       t ? "completed" : "TIMED OUT",
+	       dsi_read(msm_host, REG_DSI_STATUS0),
+	       dsi_read(msm_host, REG_DSI_INTR_CTRL));
 }
 
 static void dsi_wait4video_eng_busy(struct msm_dsi_host *msm_host)
