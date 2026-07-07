@@ -1342,17 +1342,25 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			msleep(20);
 
 			/*
-			 * The command DMA goes CMD_MODE_DMA_BUSY instantly on trigger
-			 * and never advances, with the DMA FIFO empty - the fetch never
-			 * delivers.  Test whether the DSI DMA can fetch at all: src 0
-			 * uses the normal tx_gem iova (0x08000000, DRAM), src 1 uses the
-			 * imem probe iova 0xfe000000 (SRAM, freshly IOMMU_map'd in the
-			 * same kms aspace, IOMMU_READ).  If the SRAM iova COMPLETES and
-			 * the DRAM one hangs, the fault is the tx_gem DRAM mapping/TLB
-			 * (not the command engine); if both hang, the DMA fetch is dead.
+			 * Neither the tx_gem iova nor a freshly-mapped SRAM iova (both in
+			 * the kms/MDP aspace) can be fetched: video works because the MDP
+			 * reads the framebuffer, but the DSI issues command reads through
+			 * its OWN SID, which may not be attached to that context - or may
+			 * be in SMMU bypass and need a PHYSICAL address.  Test src 0 = the
+			 * tx_gem iova (control), src 1 = the buffer's physical address
+			 * (iommu_iova_to_phys of the same iova; the buffer already holds
+			 * the command bytes).  If the physical address COMPLETES, the DSI
+			 * DMA is in bypass and the fix is a physical/coherent cmd buffer.
 			 */
+			{
+				struct msm_drm_private *priv = msm_host->dev->dev_private;
+				struct iommu_domain *dom =
+					msm_smmu_get_domain(priv->kms->aspace->mmu);
+				phys_addr_t phys = dom ?
+					iommu_iova_to_phys(dom, dma_base) : 0;
+
 			for (src = 0; src < 2; src++) {
-				u32 base = (src == 0) ? dma_base : 0xfe000000;
+				u32 base = (src == 0) ? dma_base : (u32)phys;
 				unsigned long jend;
 				u32 st, fifo, s0, s2;
 				int done = 0;
@@ -1403,10 +1411,11 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
 				s2 = st;
 				pr_err("%s: FETCH PROBE[%s]: %s base=0x%x s0=0x%x end_status0=0x%x fifo=0x%x\n",
-				       __func__, src == 0 ? "DRAM-gem" : "SRAM-imem",
+				       __func__, src == 0 ? "iova" : "phys",
 				       done ? "COMPLETED" : "hung",
 				       base, s0, s2, fifo);
 				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+			}
 			}
 
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
