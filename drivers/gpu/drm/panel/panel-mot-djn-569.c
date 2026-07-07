@@ -104,7 +104,13 @@ static int djn_569_on(struct djn_569 *ctx)
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	int ret;
 
-	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+	/*
+	 * Send the init sequence in HS, not LP: the command DMA fetch on this
+	 * controller only runs while the video engine streams, and with the
+	 * engine running the data lanes never drop to LP-11 for an LP escape.
+	 * An HS command inserts into the video HS blanking and completes.
+	 */
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
 	dsi_generic_write_seq(dsi, 0xff, 0x23);
 	dsi_generic_write_seq(dsi, 0xfb, 0x01);

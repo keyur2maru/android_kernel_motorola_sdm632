@@ -2376,26 +2376,19 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 
 	msm_host->dma_cmd_ctrl_restore = dsi_read(msm_host, REG_DSI_CTRL);
 	dsi_write(msm_host, REG_DSI_CTRL,
-		(msm_host->dma_cmd_ctrl_restore & ~DSI_CTRL_VID_MODE_EN) |
+		msm_host->dma_cmd_ctrl_restore |
 		DSI_CTRL_CMD_MODE_EN |
 		DSI_CTRL_ENABLE);
-	wmb();
+	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
 
 	/*
-	 * On this controller an LP command cannot be inserted into the video
-	 * BLLP: while the video engine runs the data lanes stay in HS and the
-	 * LP escape write never wins a transmit slot, so the command DMA times
-	 * out (-110).  Halt the DSI video engine for the transfer - clearing
-	 * VID_MODE_EN above is not enough (the engine stays busy), so sw-reset
-	 * it, exactly as msm_dsi_host_disable() does - and the data lanes drop
-	 * to LP-11 stop.  The MDP INTF keeps running, so the MDSS pipeline and
-	 * its AXI/SMMU clocks stay up and the command DMA can still fetch the
-	 * buffer.  xfer_restore() brings the video engine back.
+	 * The command DMA fetch on this controller is serviced by the running
+	 * video engine's transmit scheduler (halting the engine drops the fetch
+	 * clock and the FIFO never fills), so the video engine stays on across
+	 * the transfer.  The panel init is therefore sent in HS, inserted into
+	 * the video HS blanking - an LP escape would need the data lanes to
+	 * drop to LP-11 stop, which never happens while the engine streams.
 	 */
-	if (msm_host->dma_cmd_ctrl_restore & DSI_CTRL_VID_MODE_EN)
-		dsi_sw_reset(msm_host);
-
-	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
 
 	return 0;
 }
@@ -2407,21 +2400,7 @@ void msm_dsi_host_xfer_restore(struct mipi_dsi_host *host,
 
 
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
-
-	/* Restore the pre-transfer controller state.  If the video engine was
-	 * halted in xfer_prepare(), write the saved CTRL (VID_MODE_EN set) and
-	 * sw-reset-restore so the video engine restarts cleanly against the
-	 * still-running INTF stream.
-	 */
-	if (msm_host->dma_cmd_ctrl_restore & DSI_CTRL_VID_MODE_EN) {
-		dsi_write(msm_host, REG_DSI_CTRL,
-			  msm_host->dma_cmd_ctrl_restore);
-		wmb();
-		dsi_sw_reset_restore(msm_host);
-	} else {
-		dsi_write(msm_host, REG_DSI_CTRL,
-			  msm_host->dma_cmd_ctrl_restore);
-	}
+	dsi_write(msm_host, REG_DSI_CTRL, msm_host->dma_cmd_ctrl_restore);
 
 	if (!(msg->flags & MIPI_DSI_MSG_USE_LPM))
 		dsi_set_tx_power_mode(1, msm_host);
