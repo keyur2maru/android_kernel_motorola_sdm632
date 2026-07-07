@@ -897,6 +897,9 @@ void __iomem *msm_ioremap(struct platform_device *pdev, const char *name,
 unsigned long msm_iomap_size(struct platform_device *pdev, const char *name);
 void msm_iounmap(struct platform_device *dev, void __iomem *addr);
 void msm_writel(u32 data, void __iomem *addr);
+extern bool msm_ws_on;
+void msm_ws_register(void __iomem *base, const char *name);
+void msm_ws_arm(bool on);
 u32 msm_readl(const void __iomem *addr);
 
 #define DBG(fmt, ...) DRM_DEBUG(fmt"\n", ##__VA_ARGS__)

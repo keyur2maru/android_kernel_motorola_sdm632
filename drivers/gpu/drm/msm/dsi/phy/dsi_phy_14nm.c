@@ -98,6 +98,8 @@ static int dsi_14nm_phy_enable(struct msm_dsi_phy *phy, int src_pll_id,
 	}
 
 	dsi_14nm_dump_boot_state(phy);
+	msm_ws_register(lane_base, "l");
+	msm_ws_arm(true);
 
 	data = 0x1c;
 	if (phy->usecase != MSM_DSI_PHY_STANDALONE)

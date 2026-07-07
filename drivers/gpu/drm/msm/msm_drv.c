@@ -187,8 +187,53 @@ void msm_iounmap(struct platform_device *pdev, void __iomem *addr)
 	devm_iounmap(&pdev->dev, addr);
 }
 
+/*
+ * Write-stream tracer: registers a few MMIO windows (DSI ctrl, PHY, PHY
+ * lane) and, while armed, logs every write into them in true order with
+ * the window-relative offset.  Both dsi_write() and dsi_phy_write() route
+ * through msm_writel(), so this captures the whole ctrl+PHY bring-up
+ * sequence for a working-vs-hung diff that register readback cannot show.
+ */
+#define MSM_WS_MAX 4
+static void __iomem *msm_ws_base[MSM_WS_MAX];
+static const char *msm_ws_name[MSM_WS_MAX];
+static int msm_ws_cnt;
+static int msm_ws_lines;
+bool msm_ws_on;
+
+void msm_ws_register(void __iomem *base, const char *name)
+{
+	if (msm_ws_cnt < MSM_WS_MAX && base) {
+		msm_ws_base[msm_ws_cnt] = base;
+		msm_ws_name[msm_ws_cnt] = name;
+		msm_ws_cnt++;
+	}
+}
+
+void msm_ws_arm(bool on)
+{
+	if (on)
+		msm_ws_lines = 0;
+	msm_ws_on = on;
+}
+
 void msm_writel(u32 data, void __iomem *addr)
 {
+	if (msm_ws_on && msm_ws_lines < 600) {
+		int i;
+
+		for (i = 0; i < msm_ws_cnt; i++) {
+			unsigned long off = (u8 __iomem *)addr -
+					    (u8 __iomem *)msm_ws_base[i];
+
+			if (off < 0x1000) {
+				pr_err("WS %s +%03lx %08x\n",
+				       msm_ws_name[i], off, data);
+				msm_ws_lines++;
+				break;
+			}
+		}
+	}
 	if (reglog)
 		pr_debug("IO:W %pK %08x\n", addr, data);
 	writel(data, addr);

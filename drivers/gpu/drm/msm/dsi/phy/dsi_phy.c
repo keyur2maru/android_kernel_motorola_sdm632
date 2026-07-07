@@ -472,6 +472,7 @@ static int dsi_phy_driver_probe(struct platform_device *pdev)
 				"qcom,dsi-phy-regulator-ldo-mode");
 
 	phy->base = msm_ioremap(pdev, "dsi_phy", "DSI_PHY");
+	msm_ws_register(phy->base, "p");
 	if (IS_ERR(phy->base)) {
 		dev_err(dev, "%s: failed to map phy base\n", __func__);
 		ret = -ENOMEM;
