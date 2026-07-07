@@ -1320,17 +1320,17 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	 * (and makes the embedded FIFO a viable init path that bypasses the SMMU).
 	 */
 	{
-		static bool tpg_probed;
+		static bool te_probed;
 
-		if (!tpg_probed) {
+		if (!te_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			u32 *pl = msm_gem_get_vaddr(msm_host->tx_gem_obj);
+			u32 trig_sav = dsi_read(msm_host, REG_DSI_TRIG_CTRL);
 			unsigned long jend;
-			u32 ls, st, fifo;
-			int done = 0, j;
+			u32 ls, st, fifo, s0, s1, s2;
+			int done = 0;
 
-			tpg_probed = true;
+			te_probed = true;
 
 			if (intf) {
 				writel_relaxed(0, intf + 0x0);
@@ -1348,6 +1348,12 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			usleep_range(1000, 1100);
 			ls = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
 
+			/* clear TRIG_CTRL TE (bit31): a TE-gated DMA waits forever for
+			 * a tear-effect pulse this video-mode panel never generates */
+			dsi_write(msm_host, REG_DSI_TRIG_CTRL,
+				  trig_sav & ~DSI_TRIG_CTRL_TE);
+			wmb();
+
 			dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
 				  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
 				  DSI_CMD_DMA_CTRL_LOW_POWER);
@@ -1355,26 +1361,17 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 			reinit_completion(&msm_host->dma_comp);
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
+			dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
+			dsi_write(msm_host, REG_DSI_DMA_LEN, len);
+			dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
+			wmb();
 
-			if (!IS_ERR_OR_NULL(pl)) {
-				/* enable CMD_DMA_TPG: PATTERN_SEL=3, FIFO_MODE, TPG_EN */
-				dsi_write(msm_host, 0x158,
-					  BIT(16) | BIT(17) | BIT(2) | BIT(1));
-				wmb();
-				/* push the command dwords into the embedded FIFO */
-				for (j = 0; j < len; j += 4) {
-					dsi_write(msm_host, 0x178, pl[j / 4]);
-					wmb();
-				}
-				if ((len % 8) != 0) {
-					dsi_write(msm_host, 0x178, 0);
-					wmb();
-				}
-				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-				wmb();
-				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-				wmb();
-			}
+			/* sample STATUS0 progression right after the trigger */
+			s0 = dsi_read(msm_host, REG_DSI_STATUS0);
+			udelay(50);
+			s1 = dsi_read(msm_host, REG_DSI_STATUS0);
+			usleep_range(2000, 2100);
+			s2 = dsi_read(msm_host, REG_DSI_STATUS0);
 
 			jend = jiffies + msecs_to_jiffies(200);
 			do {
@@ -1399,20 +1396,13 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 			st = dsi_read(msm_host, REG_DSI_STATUS0);
 			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-			pr_err("%s: TPGFIFO PROBE: %s lane_status=0x%x status0=0x%x fifo=0x%x\n",
-			       __func__, done ? "COMPLETED" : "hung", ls, st, fifo);
-
-			/* reset TPG FIFO + disable CMD_DMA_TPG */
-			dsi_write(msm_host, 0x1e8, 1);
-			wmb();
-			dsi_write(msm_host, 0x1e8, 0);
-			wmb();
-			dsi_write(msm_host, 0x158, 0);
-			wmb();
+			pr_err("%s: TE-CLEAR PROBE: %s trig=0x%x->0x%x lane_status=0x%x s0=0x%x s1=0x%x s2=0x%x end_status0=0x%x fifo=0x%x\n",
+			       __func__, done ? "COMPLETED" : "hung",
+			       trig_sav, dsi_read(msm_host, REG_DSI_TRIG_CTRL),
+			       ls, s0, s1, s2, st, fifo);
 
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
-			if (!IS_ERR_OR_NULL(pl))
-				msm_gem_put_vaddr(msm_host->tx_gem_obj);
+			dsi_write(msm_host, REG_DSI_TRIG_CTRL, trig_sav);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
 			dsi_sw_reset_restore(msm_host);
