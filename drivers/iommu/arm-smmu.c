@@ -5937,6 +5937,26 @@ void arm_smmu_debug_dump_domain(struct iommu_domain *domain)
 }
 EXPORT_SYMBOL(arm_smmu_debug_dump_domain);
 
+u64 arm_smmu_debug_get_ttbr(struct iommu_domain *domain)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+
+	return smmu_domain->pgtbl_cfg.arm_lpae_s1_cfg.ttbr[0];
+}
+EXPORT_SYMBOL(arm_smmu_debug_get_ttbr);
+
+void __iomem *arm_smmu_debug_get_cb_base(struct iommu_domain *domain)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+
+	if (!smmu)
+		return NULL;
+	return ARM_SMMU_CB_BASE(smmu) +
+	       ARM_SMMU_CB(smmu, smmu_domain->cfg.cbndx);
+}
+EXPORT_SYMBOL(arm_smmu_debug_get_cb_base);
+
 /*
  * Clean every pagetable page on the walk path of @iova to DRAM.  The
  * software walk resolves while the hardware walk does not, and this SMMU
