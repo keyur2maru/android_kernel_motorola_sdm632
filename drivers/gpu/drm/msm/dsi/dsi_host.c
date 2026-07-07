@@ -2352,9 +2352,20 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 	if (!(msg->flags & MIPI_DSI_MSG_USE_LPM))
 		dsi_set_tx_power_mode(0, msm_host);
 
+	/*
+	 * Disable the video engine (clear VID_MODE_EN) for the duration of
+	 * the command and enable command mode, matching the downstream host:
+	 * the traced stock CTRL sequence drops bit1 (0x1f7 -> 0x1f5) around
+	 * each command DMA and restores it after.  On this controller a
+	 * command DMA issued with the video engine still enabled sits with
+	 * CMD_MODE_DMA_BUSY set and never clocks out; the video engine must
+	 * be paused (the PHY and byte clock stay up) so the command owns the
+	 * link for the transfer.  dma_cmd_ctrl_restore holds the original
+	 * value (video enabled) and is written back in xfer_restore.
+	 */
 	msm_host->dma_cmd_ctrl_restore = dsi_read(msm_host, REG_DSI_CTRL);
 	dsi_write(msm_host, REG_DSI_CTRL,
-		msm_host->dma_cmd_ctrl_restore |
+		(msm_host->dma_cmd_ctrl_restore & ~DSI_CTRL_VID_MODE_EN) |
 		DSI_CTRL_CMD_MODE_EN |
 		DSI_CTRL_ENABLE);
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
