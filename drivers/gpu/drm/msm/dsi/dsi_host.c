@@ -1304,30 +1304,33 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	}
 
 	/*
-	 * One-shot full-register dump in the command-ready idle state (first
+	 * One-shot embedded-FIFO (TPG) command probe over an idle link (first
 	 * command only).
 	 *
-	 * Command DMA hangs with the bytes queued in the FIFO and every lane in the
-	 * correct stop state (0x1f1f), in both LP and HS - so the fault is not the
-	 * link state but the command-engine transmit config.  Idle the link (stop
-	 * INTF + drop VID_MODE_EN + dsi_sw_reset), set up an LP command exactly as
-	 * the normal path would, dump the whole DSI0 register block, then trigger
-	 * and report.  The dump is diffed offline against the working downstream
-	 * DSI0 dump (groundtruth-los-recovery/vg-dump.log) to find the command-
-	 * engine register that differs.
+	 * The DMA FIFO reads EMPTY after the trigger (fifo=0x11111000 is the
+	 * downstream all-lanes-empty pattern BIT(12|16|20|24|28)) while the DMA
+	 * stays busy - so the command bytes are never FETCHED from the buffer, and
+	 * the SMMU cannot hw-translate the buffer iova (ATOS hard_phys=0 while the
+	 * sw pagetable walk resolves).  The fault is the memory DMA read, not the
+	 * transmit.  Confirm by sourcing the same command from the DSI embedded FIFO
+	 * instead of memory (downstream mdss_dsi_cmd_dma_tpg_tx): enable CMD_DMA_TPG
+	 * (0x15c bit1 + FIFO_MODE bit2 + PATTERN_SEL bits16/17), push the command
+	 * dwords into DMA_INIT_VAL (0x17c), set DMA_LEN and trigger.  A COMPLETED
+	 * result proves the transmit path is fine and pins the bug on the DMA fetch
+	 * (and makes the embedded FIFO a viable init path that bypasses the SMMU).
 	 */
 	{
-		static bool dump_probed;
+		static bool tpg_probed;
 
-		if (!dump_probed) {
+		if (!tpg_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
-			void __iomem *d = ioremap(0x01a94000, 0x120);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
+			u32 *pl = msm_gem_get_vaddr(msm_host->tx_gem_obj);
 			unsigned long jend;
 			u32 ls, st, fifo;
-			int done = 0, off;
+			int done = 0, j;
 
-			dump_probed = true;
+			tpg_probed = true;
 
 			if (intf) {
 				writel_relaxed(0, intf + 0x0);
@@ -1352,22 +1355,26 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 			reinit_completion(&msm_host->dma_comp);
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
-			dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
-			dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-			wmb();
 
-			/* full DSI0 register dump in the command-ready state, before
-			 * the trigger, matching the stock dump's raw-offset format */
-			for (off = 0; d && off < 0x120; off += 16)
-				pr_err("DSI0DUMP +0x%03x: %08x %08x %08x %08x\n",
-				       off,
-				       readl_relaxed(d + off),
-				       readl_relaxed(d + off + 4),
-				       readl_relaxed(d + off + 8),
-				       readl_relaxed(d + off + 12));
-
-			dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-			wmb();
+			if (!IS_ERR_OR_NULL(pl)) {
+				/* enable CMD_DMA_TPG: PATTERN_SEL=3, FIFO_MODE, TPG_EN */
+				dsi_write(msm_host, 0x158,
+					  BIT(16) | BIT(17) | BIT(2) | BIT(1));
+				wmb();
+				/* push the command dwords into the embedded FIFO */
+				for (j = 0; j < len; j += 4) {
+					dsi_write(msm_host, 0x178, pl[j / 4]);
+					wmb();
+				}
+				if ((len % 8) != 0) {
+					dsi_write(msm_host, 0x178, 0);
+					wmb();
+				}
+				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
+				wmb();
+				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
+				wmb();
+			}
 
 			jend = jiffies + msecs_to_jiffies(200);
 			do {
@@ -1392,10 +1399,20 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 			st = dsi_read(msm_host, REG_DSI_STATUS0);
 			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-			pr_err("%s: DUMP PROBE: %s lane_status=0x%x status0=0x%x fifo=0x%x\n",
+			pr_err("%s: TPGFIFO PROBE: %s lane_status=0x%x status0=0x%x fifo=0x%x\n",
 			       __func__, done ? "COMPLETED" : "hung", ls, st, fifo);
 
+			/* reset TPG FIFO + disable CMD_DMA_TPG */
+			dsi_write(msm_host, 0x1e8, 1);
+			wmb();
+			dsi_write(msm_host, 0x1e8, 0);
+			wmb();
+			dsi_write(msm_host, 0x158, 0);
+			wmb();
+
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+			if (!IS_ERR_OR_NULL(pl))
+				msm_gem_put_vaddr(msm_host->tx_gem_obj);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
 			dsi_sw_reset_restore(msm_host);
@@ -1404,8 +1421,6 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				wmb();
 				iounmap(intf);
 			}
-			if (d)
-				iounmap(d);
 			msleep(20);
 		}
 	}
