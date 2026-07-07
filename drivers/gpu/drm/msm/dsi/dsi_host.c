@@ -898,6 +898,19 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	 */
 	dsi_write(msm_host, 0xbc, 0x3fd08);
 
+	/*
+	 * DSI_DMA_FIFO_CTRL (0x50): command DMA FIFO read watermark.  The
+	 * downstream host writes 0x30 ("read watermark 15/16 full") at the
+	 * end of host init; mainline msm never programs it, leaving the
+	 * watermark at reset (0).  With no read watermark the command DMA
+	 * engine's drain logic never releases the FIFO to the link, so the
+	 * transfer sits with CMD_MODE_DMA_BUSY set and the FIFO full while
+	 * nothing clocks out - the exact command-DMA-never-completes hang.
+	 * Not covered by any register dump, so it survived every readback
+	 * comparison; the write-stream trace showed it missing.
+	 */
+	dsi_write(msm_host, 0x50, 0x30);
+
 	/* allow only ack-err-status to generate interrupt */
 	dsi_write(msm_host, REG_DSI_ERR_INT_MASK0, 0x13ff3fe0);
 
