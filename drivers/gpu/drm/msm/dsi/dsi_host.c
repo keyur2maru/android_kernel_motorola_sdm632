@@ -1009,29 +1009,14 @@ static void dsi_op_mode_config(struct msm_dsi_host *msm_host,
 		if (video_mode) {
 			dsi_ctrl |= DSI_CTRL_VID_MODE_EN;
 
-			/*
-			 * Force the clock lane into HS for the video session.
-			 *
-			 * This runs at video-engine start (msm_dsi_host_enable),
-			 * AFTER the LP init command sequence (drm_panel_prepare) has
-			 * completed - which is the whole point of doing it here and
-			 * not in dsi_ctrl_config().  On this 14nm PHY a forced HS
-			 * clock blocks the data lanes from entering LP escape, so if
-			 * the clock lane is forced HS before the init commands run
-			 * they stall (device #225).  But the PHY also does NOT
-			 * auto-engage the clock lane for HS when the video engine
-			 * starts (device #223/#225: LANE_STATUS clock-lane stop bit4
-			 * stays set after VID_MODE_EN), so with no HS byte clock the
-			 * active-video pixel stream never reaches the panel and the
-			 * glass is uniform black.  Requesting clock-lane HS here - the
-			 * same bit mainline uses for continuous-clock panels, but
-			 * deferred past LP init - gives working LP init AND a HS clock
-			 * for the pixel stream.  Read-modify-write to preserve the
-			 * lane bits dsi_ctrl_config() already cleared.
+			/* No clock-lane HS force: the bootloader and the
+			 * downstream host both run this panel with
+			 * LANE_CTRL=0.  The PHY engages the HS clock per
+			 * protocol once the video engine transmits (the MDP
+			 * interface feeds it before the panel commands run),
+			 * and a forced-HS clock lane blocks the LP escape
+			 * that BLLP command insertion needs.
 			 */
-			dsi_write(msm_host, REG_DSI_LANE_CTRL,
-				dsi_read(msm_host, REG_DSI_LANE_CTRL) |
-				DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
 		} else {		/* command mode */
 			dsi_ctrl |= DSI_CTRL_CMD_MODE_EN;
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_MDP_DONE, 1);
