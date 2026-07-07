@@ -1432,6 +1432,23 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					dma_base) });
 			}
 
+			/* Link-clock branch state at the hang instant: LP
+			 * escape transmission runs on the esc clock, HS on
+			 * byte/pixel.  CBCR bit31 = CLK_OFF.
+			 */
+			{
+				void __iomem *gcc = ioremap(0x0184d084, 0x20);
+
+				if (gcc) {
+					pr_err("%s: cbcr pclk0=0x%08x byte0=0x%08x esc0=0x%08x\n",
+					       __func__,
+					       readl_relaxed(gcc + 0x0),
+					       readl_relaxed(gcc + 0x10),
+					       readl_relaxed(gcc + 0x14));
+					iounmap(gcc);
+				}
+			}
+
 			/* One-shot experiment matrix: retry a FIFO-sourced
 			 * transfer under engine-restart permutations.  Every
 			 * working reference initializes the panel on a video
