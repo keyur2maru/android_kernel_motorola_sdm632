@@ -494,20 +494,8 @@ static void dsi_mgr_bridge_pre_enable(struct drm_bridge *bridge)
 		}
 	}
 
-	if (panel) {
-		ret = drm_panel_enable(panel);
-		if (ret) {
-			pr_err("%s: enable panel %d failed, %d\n", __func__, id,
-									ret);
-			goto panel_en_fail;
-		}
-	}
-
 	return;
 
-panel_en_fail:
-	if (is_dual_dsi && msm_dsi1)
-		msm_dsi_host_disable(msm_dsi1->host);
 host1_en_fail:
 	msm_dsi_host_disable(host);
 host_en_fail:
@@ -526,7 +514,25 @@ phy_en_fail:
 
 static void dsi_mgr_bridge_enable(struct drm_bridge *bridge)
 {
-	DBG("");
+	int id = dsi_mgr_bridge_get_id(bridge);
+	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
+	struct drm_panel *panel = msm_dsi->panel;
+	int ret;
+
+	DBG("id=%d", id);
+
+	/* The panel init commands go out here, after the encoder enable
+	 * has started the MDP interface: the command DMA fetch is only
+	 * serviced when the video engine is transmitting and provides
+	 * BLLP slots, and the video engine only transmits once the MDP
+	 * interface feeds it.
+	 */
+	if (panel) {
+		ret = drm_panel_enable(panel);
+		if (ret)
+			pr_err("%s: enable panel %d failed, %d\n", __func__,
+			       id, ret);
+	}
 }
 
 static void dsi_mgr_bridge_disable(struct drm_bridge *bridge)
