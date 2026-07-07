@@ -1458,6 +1458,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					{ "phycmn",  0x01a94400, 0x100 },
 					{ "phyln",   0x01a94500, 0x300 },
 					{ "phypll",  0x01a94800, 0x200 },
+					{ "intf1",   0x01a6b800, 0x280 },
 				};
 				int r;
 				u32 off;
