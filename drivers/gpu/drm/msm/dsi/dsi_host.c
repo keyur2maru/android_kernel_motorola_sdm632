@@ -2388,7 +2388,16 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 	 * the transfer.  The panel init is therefore sent in HS, inserted into
 	 * the video HS blanking - an LP escape would need the data lanes to
 	 * drop to LP-11 stop, which never happens while the engine streams.
+	 *
+	 * Force the clock lane to HS for the duration, exactly as the downstream
+	 * host does around every command DMA (mdss_dsi_start_hs_clk_lane sets
+	 * LANE_CTRL CLKLN_HS_FORCE_REQUEST): the HS command needs a continuous HS
+	 * clock to shift out of the DMA FIFO onto the lanes.  Left at 0 the DMA
+	 * only ever fetches part of the packet and never completes.
 	 */
+	dsi_write(msm_host, REG_DSI_LANE_CTRL,
+		  DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+	wmb();
 
 	return 0;
 }
@@ -2400,6 +2409,11 @@ void msm_dsi_host_xfer_restore(struct mipi_dsi_host *host,
 
 
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+
+	/* release the clock-lane HS force taken in xfer_prepare() */
+	dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);
+	wmb();
+
 	dsi_write(msm_host, REG_DSI_CTRL, msm_host->dma_cmd_ctrl_restore);
 
 	if (!(msg->flags & MIPI_DSI_MSG_USE_LPM))
