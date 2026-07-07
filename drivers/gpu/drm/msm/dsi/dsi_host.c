@@ -1293,141 +1293,32 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	bool triggered;
 
 	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
+		struct iommu_domain *dom;
+
 		ret = msm_gem_get_iova(msm_host->tx_gem_obj,
 				priv->kms->aspace, &dma_base);
 		if (ret) {
 			pr_err("%s: failed to get iova: %d\n", __func__, ret);
 			return ret;
 		}
+
+		/*
+		 * This SoC's DSI command-DMA master is in SMMU bypass: it
+		 * fetches the command buffer with a physical address, not the
+		 * SMMU iova drm/msm normally programs.  Feeding it the iova
+		 * stalls the fetch (CMD_MODE_DMA_BUSY latched, DMA FIFO empty,
+		 * the command never clocks out); the buffer's backing physical
+		 * address completes.  Scanout is unaffected because the MDP is a
+		 * separate, translated master.  Translate the just-mapped iova to
+		 * its physical address for the DMA.  DSI commands are single
+		 * small packets that never leave the buffer's first page, so the
+		 * base translation covers the whole transfer.
+		 */
+		dom = msm_smmu_get_domain(priv->kms->aspace->mmu);
+		if (dom)
+			dma_base = iommu_iova_to_phys(dom, dma_base);
 	} else {
 		dma_base = msm_host->tx_buf_paddr;
-	}
-
-	/*
-	 * One-shot embedded-FIFO (TPG) command probe over an idle link (first
-	 * command only).
-	 *
-	 * The DMA FIFO reads EMPTY after the trigger (fifo=0x11111000 is the
-	 * downstream all-lanes-empty pattern BIT(12|16|20|24|28)) while the DMA
-	 * stays busy - so the command bytes are never FETCHED from the buffer, and
-	 * the SMMU cannot hw-translate the buffer iova (ATOS hard_phys=0 while the
-	 * sw pagetable walk resolves).  The fault is the memory DMA read, not the
-	 * transmit.  Confirm by sourcing the same command from the DSI embedded FIFO
-	 * instead of memory (downstream mdss_dsi_cmd_dma_tpg_tx): enable CMD_DMA_TPG
-	 * (0x15c bit1 + FIFO_MODE bit2 + PATTERN_SEL bits16/17), push the command
-	 * dwords into DMA_INIT_VAL (0x17c), set DMA_LEN and trigger.  A COMPLETED
-	 * result proves the transmit path is fine and pins the bug on the DMA fetch
-	 * (and makes the embedded FIFO a viable init path that bypasses the SMMU).
-	 */
-	{
-		static bool fetch_probed;
-
-		if (!fetch_probed) {
-			void __iomem *intf = ioremap(0x01a6b800, 0x10);
-			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			int src;
-
-			fetch_probed = true;
-
-			/* idle the link once */
-			if (intf) {
-				writel_relaxed(0, intf + 0x0);
-				wmb();
-			}
-			dsi_write(msm_host, REG_DSI_CTRL,
-				  ctrl_sav & ~DSI_CTRL_VID_MODE_EN);
-			wmb();
-			dsi_sw_reset(msm_host);
-			wmb();
-			msleep(20);
-
-			/*
-			 * Neither the tx_gem iova nor a freshly-mapped SRAM iova (both in
-			 * the kms/MDP aspace) can be fetched: video works because the MDP
-			 * reads the framebuffer, but the DSI issues command reads through
-			 * its OWN SID, which may not be attached to that context - or may
-			 * be in SMMU bypass and need a PHYSICAL address.  Test src 0 = the
-			 * tx_gem iova (control), src 1 = the buffer's physical address
-			 * (iommu_iova_to_phys of the same iova; the buffer already holds
-			 * the command bytes).  If the physical address COMPLETES, the DSI
-			 * DMA is in bypass and the fix is a physical/coherent cmd buffer.
-			 */
-			{
-				struct msm_drm_private *priv = msm_host->dev->dev_private;
-				struct iommu_domain *dom =
-					msm_smmu_get_domain(priv->kms->aspace->mmu);
-				phys_addr_t phys = dom ?
-					iommu_iova_to_phys(dom, dma_base) : 0;
-
-			for (src = 0; src < 2; src++) {
-				u32 base = (src == 0) ? dma_base : (u32)phys;
-				unsigned long jend;
-				u32 st, fifo, s0, s2;
-				int done = 0;
-
-				dsi_sw_reset(msm_host);
-				wmb();
-				msleep(5);
-
-				dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);	/* LP */
-				wmb();
-				usleep_range(1000, 1100);
-				dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
-					  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
-					  DSI_CMD_DMA_CTRL_LOW_POWER);
-				wmb();
-
-				reinit_completion(&msm_host->dma_comp);
-				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
-				dsi_write(msm_host, REG_DSI_DMA_BASE, base);
-				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-				wmb();
-
-				s0 = dsi_read(msm_host, REG_DSI_STATUS0);
-
-				jend = jiffies + msecs_to_jiffies(200);
-				do {
-					unsigned long flags;
-					u32 istat;
-
-					if (wait_for_completion_timeout(&msm_host->dma_comp,
-							msecs_to_jiffies(2)) > 0) {
-						done = 1;
-						break;
-					}
-					spin_lock_irqsave(&msm_host->intr_lock, flags);
-					istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
-					if (istat & DSI_IRQ_CMD_DMA_DONE)
-						dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
-					spin_unlock_irqrestore(&msm_host->intr_lock, flags);
-					if (istat & DSI_IRQ_CMD_DMA_DONE) {
-						done = 1;
-						break;
-					}
-				} while (time_before(jiffies, jend));
-
-				st = dsi_read(msm_host, REG_DSI_STATUS0);
-				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-				s2 = st;
-				pr_err("%s: FETCH PROBE[%s]: %s base=0x%x s0=0x%x end_status0=0x%x fifo=0x%x\n",
-				       __func__, src == 0 ? "iova" : "phys",
-				       done ? "COMPLETED" : "hung",
-				       base, s0, s2, fifo);
-				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
-			}
-			}
-
-			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
-			wmb();
-			dsi_sw_reset_restore(msm_host);
-			if (intf) {
-				writel_relaxed(1, intf + 0x0);
-				wmb();
-				iounmap(intf);
-			}
-			msleep(20);
-		}
 	}
 
 	reinit_completion(&msm_host->dma_comp);
