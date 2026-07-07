@@ -847,17 +847,13 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	data |= DSI_TRIG_CTRL_MDP_TRIGGER(TRIGGER_NONE);
 	data |= DSI_TRIG_CTRL_DMA_TRIGGER(TRIGGER_SW);
 	data |= DSI_TRIG_CTRL_STREAM(msm_host->channel);
+	/* te_sel: the downstream host sets TRIG_CTRL bit31 (0x80000004) for
+	 * this panel; the traced write stream confirms it.  It does not
+	 * gate the SW-triggered command DMA (stock SW-triggers with it set)
+	 * but is part of the register state the panel is initialised under.
+	 */
+	data |= DSI_TRIG_CTRL_TE;
 	if (!(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO)) {
-		/* TE and the DMA-vs-frame hardware gate only apply to the
-		 * command-mode MDP stream.  For video-mode panels the
-		 * downstream host programs TRIG_CTRL to just the SW DMA
-		 * trigger and schedules command DMA into the blanking in
-		 * software (dsi_wait4video_eng_busy here).  With
-		 * BLOCK_DMA_WITHIN_FRAME set, a triggered DMA is held by
-		 * frame-position state the bootloader's video engine left
-		 * behind, so the transfer can latch busy and never fetch.
-		 */
-		data |= DSI_TRIG_CTRL_TE;
 		if ((cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) &&
 			(cfg_hnd->minor >= MSM_DSI_6G_VER_MINOR_V1_2))
 			data |= DSI_TRIG_CTRL_BLOCK_DMA_WITHIN_FRAME;
