@@ -291,6 +291,21 @@ static int djn_569_enable(struct drm_panel *panel)
 		return ret;
 	}
 
+	/* Non-fatal init receipt check: 0x9c means sleep-out and
+	 * display-on landed.  HS read, as the clock lane is force-HS
+	 * while video runs.
+	 */
+	{
+		u8 pwr = 0;
+
+		ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+		ret = mipi_dsi_dcs_read(ctx->dsi, MIPI_DCS_GET_POWER_MODE,
+					&pwr, 1);
+		ctx->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+		dev_info(panel->dev, "power mode after init: ret=%d 0x%02x\n",
+			 ret, pwr);
+	}
+
 	if (ctx->bklt_en_gpio)
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 1);
 
@@ -471,7 +486,11 @@ static int djn_569_probe(struct mipi_dsi_device *dsi)
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+	/* Non-burst sync-event, matching the traffic mode the bootloader
+	 * and the downstream stack run this panel with (VID_CFG0 live
+	 * value 0x80009130: traffic mode 1 + last-line-interleave).
+	 */
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO |
 			  MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM;
 
 	ret = djn_569_add(ctx);
