@@ -1320,18 +1320,16 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	 * (and makes the embedded FIFO a viable init path that bypasses the SMMU).
 	 */
 	{
-		static bool te_probed;
+		static bool fetch_probed;
 
-		if (!te_probed) {
+		if (!fetch_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			u32 trig_sav = dsi_read(msm_host, REG_DSI_TRIG_CTRL);
-			unsigned long jend;
-			u32 ls, st, fifo, s0, s1, s2;
-			int done = 0;
+			int src;
 
-			te_probed = true;
+			fetch_probed = true;
 
+			/* idle the link once */
 			if (intf) {
 				writel_relaxed(0, intf + 0x0);
 				wmb();
@@ -1343,66 +1341,74 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			wmb();
 			msleep(20);
 
-			dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);	/* LP escape */
-			wmb();
-			usleep_range(1000, 1100);
-			ls = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
+			/*
+			 * The command DMA goes CMD_MODE_DMA_BUSY instantly on trigger
+			 * and never advances, with the DMA FIFO empty - the fetch never
+			 * delivers.  Test whether the DSI DMA can fetch at all: src 0
+			 * uses the normal tx_gem iova (0x08000000, DRAM), src 1 uses the
+			 * imem probe iova 0xfe000000 (SRAM, freshly IOMMU_map'd in the
+			 * same kms aspace, IOMMU_READ).  If the SRAM iova COMPLETES and
+			 * the DRAM one hangs, the fault is the tx_gem DRAM mapping/TLB
+			 * (not the command engine); if both hang, the DMA fetch is dead.
+			 */
+			for (src = 0; src < 2; src++) {
+				u32 base = (src == 0) ? dma_base : 0xfe000000;
+				unsigned long jend;
+				u32 st, fifo, s0, s2;
+				int done = 0;
 
-			/* clear TRIG_CTRL TE (bit31): a TE-gated DMA waits forever for
-			 * a tear-effect pulse this video-mode panel never generates */
-			dsi_write(msm_host, REG_DSI_TRIG_CTRL,
-				  trig_sav & ~DSI_TRIG_CTRL_TE);
-			wmb();
+				dsi_sw_reset(msm_host);
+				wmb();
+				msleep(5);
 
-			dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
-				  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
-				  DSI_CMD_DMA_CTRL_LOW_POWER);
-			wmb();
+				dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);	/* LP */
+				wmb();
+				usleep_range(1000, 1100);
+				dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
+					  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+					  DSI_CMD_DMA_CTRL_LOW_POWER);
+				wmb();
 
-			reinit_completion(&msm_host->dma_comp);
-			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
-			dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
-			dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-			dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-			wmb();
+				reinit_completion(&msm_host->dma_comp);
+				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
+				dsi_write(msm_host, REG_DSI_DMA_BASE, base);
+				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
+				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
+				wmb();
 
-			/* sample STATUS0 progression right after the trigger */
-			s0 = dsi_read(msm_host, REG_DSI_STATUS0);
-			udelay(50);
-			s1 = dsi_read(msm_host, REG_DSI_STATUS0);
-			usleep_range(2000, 2100);
-			s2 = dsi_read(msm_host, REG_DSI_STATUS0);
+				s0 = dsi_read(msm_host, REG_DSI_STATUS0);
 
-			jend = jiffies + msecs_to_jiffies(200);
-			do {
-				unsigned long flags;
-				u32 istat;
+				jend = jiffies + msecs_to_jiffies(200);
+				do {
+					unsigned long flags;
+					u32 istat;
 
-				if (wait_for_completion_timeout(&msm_host->dma_comp,
-						msecs_to_jiffies(2)) > 0) {
-					done = 1;
-					break;
-				}
-				spin_lock_irqsave(&msm_host->intr_lock, flags);
-				istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
-				if (istat & DSI_IRQ_CMD_DMA_DONE)
-					dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
-				spin_unlock_irqrestore(&msm_host->intr_lock, flags);
-				if (istat & DSI_IRQ_CMD_DMA_DONE) {
-					done = 1;
-					break;
-				}
-			} while (time_before(jiffies, jend));
+					if (wait_for_completion_timeout(&msm_host->dma_comp,
+							msecs_to_jiffies(2)) > 0) {
+						done = 1;
+						break;
+					}
+					spin_lock_irqsave(&msm_host->intr_lock, flags);
+					istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
+					if (istat & DSI_IRQ_CMD_DMA_DONE)
+						dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
+					spin_unlock_irqrestore(&msm_host->intr_lock, flags);
+					if (istat & DSI_IRQ_CMD_DMA_DONE) {
+						done = 1;
+						break;
+					}
+				} while (time_before(jiffies, jend));
 
-			st = dsi_read(msm_host, REG_DSI_STATUS0);
-			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-			pr_err("%s: TE-CLEAR PROBE: %s trig=0x%x->0x%x lane_status=0x%x s0=0x%x s1=0x%x s2=0x%x end_status0=0x%x fifo=0x%x\n",
-			       __func__, done ? "COMPLETED" : "hung",
-			       trig_sav, dsi_read(msm_host, REG_DSI_TRIG_CTRL),
-			       ls, s0, s1, s2, st, fifo);
+				st = dsi_read(msm_host, REG_DSI_STATUS0);
+				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
+				s2 = st;
+				pr_err("%s: FETCH PROBE[%s]: %s base=0x%x s0=0x%x end_status0=0x%x fifo=0x%x\n",
+				       __func__, src == 0 ? "DRAM-gem" : "SRAM-imem",
+				       done ? "COMPLETED" : "hung",
+				       base, s0, s2, fifo);
+				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+			}
 
-			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
-			dsi_write(msm_host, REG_DSI_TRIG_CTRL, trig_sav);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
 			dsi_sw_reset_restore(msm_host);
