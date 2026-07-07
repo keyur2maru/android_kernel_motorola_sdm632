@@ -184,7 +184,6 @@ struct msm_dsi_host {
 	int num_data_lanes;
 
 	u32 dma_cmd_ctrl_restore;
-	bool tpg_in_flight;
 
 	bool registered;
 	bool power_on;
@@ -1374,18 +1373,6 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			}
 		} while (time_before(jiffies, jiffies_end));
 
-		/* FIFO-path transfer: reset the TPG FIFO and disable the
-		 * TPG regardless of outcome (raw 0x1ec / 0x15c).
-		 */
-		if (msm_host->tpg_in_flight) {
-			dsi_write(msm_host, 0x1e8, 1);
-			wmb();
-			dsi_write(msm_host, 0x1e8, 0);
-			wmb();
-			dsi_write(msm_host, 0x158, 0);
-			msm_host->tpg_in_flight = false;
-		}
-
 		if (ret == 0) {
 			/*
 			 * Full command-engine snapshot on the failing command so
@@ -2562,42 +2549,8 @@ void msm_dsi_host_cmd_xfer_commit(struct mipi_dsi_host *host, u32 dma_base,
 				  u32 len)
 {
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
-	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
-	u32 *payload = NULL;
 
-	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G && msm_host->tx_gem_obj)
-		payload = msm_gem_get_vaddr(msm_host->tx_gem_obj);
-
-	/* Feed the command through the DMA FIFO (TPG) path instead of a
-	 * memory fetch: the fetch engine on this controller never issues
-	 * the read (validated by an unmapped-iova retrigger that raises
-	 * no context fault), while the FIFO path is the mode the
-	 * downstream host uses for secure sessions on the same hardware
-	 * revision.  Payload words go to DMA_INIT_VAL (raw 0x17c), padded
-	 * to an even number of dword writes; DMA_LEN and the trigger are
-	 * unchanged, and the FIFO is reset and the TPG disabled after the
-	 * transfer completes in dsi_cmd_dma_tx.
-	 */
-	if (payload && !IS_ERR(payload) && len <= 64) {
-		u32 i;
-
-		/* pattern_sel=3 | fifo_mode | tpg enable (raw 0x15c) */
-		dsi_write(msm_host, 0x158,
-			  BIT(16) | BIT(17) | BIT(2) | BIT(1));
-		for (i = 0; i < len; i += 4) {
-			dsi_write(msm_host, 0x178, payload[i / 4]);
-			wmb();
-		}
-		if ((len % 8) != 0) {
-			dsi_write(msm_host, 0x178, 0);
-			wmb();
-		}
-		msm_host->tpg_in_flight = true;
-	} else {
-		dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
-		msm_host->tpg_in_flight = false;
-	}
-
+	dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
 	dsi_write(msm_host, REG_DSI_DMA_LEN, len);
 	dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
 
