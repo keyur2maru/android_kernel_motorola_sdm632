@@ -887,6 +887,17 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 		data |= DSI_EOT_PACKET_CTRL_TX_EOT_APPEND;
 	dsi_write(msm_host, REG_DSI_EOT_PACKET_CTRL, data);
 
+	/*
+	 * DSI_HS_TIMER_CTRL (0xbc): timer resolution + HS TX timeout.  The
+	 * downstream host writes 0x3fd08 (resolution = 8 esc clk, HS TX
+	 * timeout 0x3f08) at host init; mainline msm never programs this
+	 * register, leaving it at its reset value.  It governs the escape /
+	 * timeout state machine the command DMA engine waits on, and is not
+	 * covered by any register dump, so it survived every readback
+	 * comparison while the write-stream trace showed it missing.
+	 */
+	dsi_write(msm_host, 0xbc, 0x3fd08);
+
 	/* allow only ack-err-status to generate interrupt */
 	dsi_write(msm_host, REG_DSI_ERR_INT_MASK0, 0x13ff3fe0);
 
