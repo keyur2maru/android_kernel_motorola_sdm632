@@ -265,6 +265,32 @@ static int djn_569_prepare(struct drm_panel *panel)
 
 	djn_569_reset(ctx);
 
+	/*
+	 * Send the panel init sequence here, from prepare(), before the host
+	 * starts the video engine: the bridge pre-enable runs
+	 * drm_panel_prepare() ahead of msm_dsi_host_enable(), so the link is
+	 * still idle and the data lanes rest in LP-11.  The LP DCS init writes
+	 * then take an escape slot; once the video engine streams, the data
+	 * lanes stay in HS and an LP command can never win a transmit window
+	 * (it times out -110).  The command DMA fetch itself works from any
+	 * state now that the buffer is identity-mapped for the DSI's SMMU
+	 * context (see dsi_cmd_dma_tx).
+	 */
+	if (!ctx->init_failed) {
+		int r = djn_569_on(ctx);
+
+		if (r < 0) {
+			dev_err(panel->dev,
+				"failed to initialize panel: %d\n", r);
+			/* Latch the failure: every retry parks another DMA
+			 * transaction on the fabric and eventually starves
+			 * other bus masters (USB dies), so fail fast and leave
+			 * the link quiet after the first attempt.
+			 */
+			ctx->init_failed = true;
+		}
+	}
+
 	ctx->prepared = true;
 
 	return 0;
@@ -278,28 +304,8 @@ static int djn_569_enable(struct drm_panel *panel)
 	if (ctx->enabled)
 		return 0;
 
-	/* The init sequence is sent from enable(), after the host has
-	 * started the video engine, not from prepare(): on this
-	 * controller the command DMA fetch is only serviced when the
-	 * transmit scheduler has a slot, which the running video engine
-	 * provides (BLLP insertion).  With the link idle the DMA engine
-	 * sits busy forever and never fetches.  The downstream driver
-	 * sends every panel command with the video engine running.
-	 */
 	if (ctx->init_failed)
 		return -ENODEV;
-
-	ret = djn_569_on(ctx);
-	if (ret < 0) {
-		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
-		/* Latch the failure: every retry parks another DMA
-		 * transaction on the fabric and eventually starves other
-		 * bus masters (USB dies), so fail fast and leave the link
-		 * quiet after the first attempt.
-		 */
-		ctx->init_failed = true;
-		return ret;
-	}
 
 	/* Non-fatal init receipt check: 0x9c means sleep-out and
 	 * display-on landed.  HS read, as the clock lane is force-HS
