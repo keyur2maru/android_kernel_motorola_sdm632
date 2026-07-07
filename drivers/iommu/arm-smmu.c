@@ -5973,9 +5973,12 @@ void arm_smmu_debug_clean_pgtables(struct iommu_domain *domain,
 	phys_addr_t tbl = ttbr & GENMASK_ULL(47, 12);
 	int level;
 
-	for (level = 0; level < 4; level++) {
+	/* 3-level table (qcom,use-3-lvl-tables, 39-bit va): top level
+	 * indexes at bits [38:30].
+	 */
+	for (level = 0; level < 3; level++) {
 		u64 *va = phys_to_virt(tbl);
-		int shift = 39 - 9 * level;
+		int shift = 30 - 9 * level;
 		u64 desc;
 
 		__flush_dcache_area(va, PAGE_SIZE);
