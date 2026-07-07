@@ -1304,28 +1304,25 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	}
 
 	/*
-	 * One-shot idle-link LP-escape probe (first command only).
+	 * One-shot LP-vs-HS discriminator over a genuinely idle link (first
+	 * command only).
 	 *
-	 * During active video the command bytes are queued but the data lanes
-	 * never reach LP-11 STOP, so no LP escape window opens and the DMA hangs
-	 * to the 200ms timeout.  The one path never actually tested is a
-	 * genuinely idle link.  Clearing the DSI VID_MODE_EN is not enough: a
-	 * running video engine keeps STATUS0 VIDEO_MODE_BUSY set and blocks the
-	 * command engine, which is why the #61 probe still read status0=0xb.
-	 * msm_dsi_host_disable() documents the fix - after disabling the INTF and
-	 * clearing the video enable it issues dsi_sw_reset() to actually stop the
-	 * video engine so the command engine is free.  Mirror that here: stop the
-	 * MDP INTF timing engine, drop VID_MODE_EN (keeping ENABLE|CMD_MODE_EN),
-	 * sw-reset to flush the video engine, then send the command over the idle
-	 * link with the bus clocks still forced on (dsi_clk_ctrl held by
-	 * xfer_prepare).  idle_status0 confirms VIDEO_MODE_BUSY actually cleared;
-	 * lane_status (true LANE_STATUS at ctrl+0xa4) shows whether the lanes
-	 * reached LP-11 stop.
+	 * The idle-link probe established that the LP command DMA hangs even with
+	 * the video engine confirmed stopped (idle_status0=0), the bytes fetched
+	 * into the FIFO, and the DMA kicked off - so the fault is in the LP-escape
+	 * transmit path, not arbitration with video.  HS demonstrably works (video
+	 * streams, scanout works), so send the same command both ways over the
+	 * idle link: attempt 0 = LP escape (CMD_DMA_CTRL LOW_POWER), attempt 1 = HS
+	 * (LOW_POWER cleared), with a sw_reset between to flush the stuck engine.
 	 *
-	 * COMPLETED -> LP escape works once the lanes can stop, so panel init has
-	 * to run over an idle link before the video engine starts; hung with the
-	 * video engine stopped and lanes in stop pins the fault on the LP escape
-	 * path itself (esc clock / PHY LP).  The pipeline is restored afterwards.
+	 * HS COMPLETED -> the fault is LP-specific and HS init is a viable path;
+	 * HS also hung -> a deeper command-DMA/controller issue.  To idle the link,
+	 * stop the MDP INTF timing engine and clear VID_MODE_EN, then dsi_sw_reset()
+	 * to actually halt the video engine (clearing VID_MODE_EN alone leaves
+	 * STATUS0 VIDEO_MODE_BUSY set and blocks the command engine, as
+	 * msm_dsi_host_disable() documents).  Bus clocks stay forced on across the
+	 * transfer (dsi_clk_ctrl held by xfer_prepare).  The pipeline is restored
+	 * afterwards and the normal send is retried below.
 	 */
 	{
 		static bool idle_probed;
@@ -1333,9 +1330,8 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		if (!idle_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			u32 idle_st0, ls, st, fifo;
-			unsigned long jend;
-			int done = 0;
+			u32 idle_st0, ls;
+			int attempt;
 
 			idle_probed = true;
 
@@ -1353,42 +1349,60 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			idle_st0 = dsi_read(msm_host, REG_DSI_STATUS0);
 			ls = dsi_read(msm_host, 0xa0);		/* ctrl+0xa4 = LANE_STATUS */
 
-			reinit_completion(&msm_host->dma_comp);
-			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
-			dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
-			dsi_write(msm_host, REG_DSI_DMA_LEN, len);
-			dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
-			wmb();
+			for (attempt = 0; attempt < 2; attempt++) {
+				unsigned long jend;
+				u32 st, fifo;
+				int done = 0;
 
-			jend = jiffies + msecs_to_jiffies(200);
-			do {
-				unsigned long flags;
-				u32 istat;
+				dsi_sw_reset(msm_host);		/* flush the previous attempt */
+				wmb();
+				dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
+					  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+					  (attempt == 0 ?
+					   DSI_CMD_DMA_CTRL_LOW_POWER : 0));
+				wmb();
 
-				if (wait_for_completion_timeout(&msm_host->dma_comp,
-						msecs_to_jiffies(2)) > 0) {
-					done = 1;
-					break;
-				}
-				spin_lock_irqsave(&msm_host->intr_lock, flags);
-				istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
-				if (istat & DSI_IRQ_CMD_DMA_DONE)
-					dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
-				spin_unlock_irqrestore(&msm_host->intr_lock, flags);
-				if (istat & DSI_IRQ_CMD_DMA_DONE) {
-					done = 1;
-					break;
-				}
-			} while (time_before(jiffies, jend));
+				reinit_completion(&msm_host->dma_comp);
+				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
+				dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
+				dsi_write(msm_host, REG_DSI_DMA_LEN, len);
+				dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
+				wmb();
 
-			st = dsi_read(msm_host, REG_DSI_STATUS0);
-			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-			pr_err("%s: IDLE-LINK PROBE: %s idle_status0=0x%x lane_status=0x%x end_status0=0x%x fifo=0x%x\n",
-			       __func__, done ? "COMPLETED" : "hung",
-			       idle_st0, ls, st, fifo);
+				jend = jiffies + msecs_to_jiffies(200);
+				do {
+					unsigned long flags;
+					u32 istat;
+
+					if (wait_for_completion_timeout(&msm_host->dma_comp,
+							msecs_to_jiffies(2)) > 0) {
+						done = 1;
+						break;
+					}
+					spin_lock_irqsave(&msm_host->intr_lock, flags);
+					istat = dsi_read(msm_host, REG_DSI_INTR_CTRL);
+					if (istat & DSI_IRQ_CMD_DMA_DONE)
+						dsi_write(msm_host, REG_DSI_INTR_CTRL, istat);
+					spin_unlock_irqrestore(&msm_host->intr_lock, flags);
+					if (istat & DSI_IRQ_CMD_DMA_DONE) {
+						done = 1;
+						break;
+					}
+				} while (time_before(jiffies, jend));
+
+				st = dsi_read(msm_host, REG_DSI_STATUS0);
+				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
+				pr_err("%s: IDLE-LINK PROBE[%s]: %s idle_status0=0x%x lane_status=0x%x end_status0=0x%x fifo=0x%x\n",
+				       __func__, attempt == 0 ? "LP" : "HS",
+				       done ? "COMPLETED" : "hung",
+				       idle_st0, ls, st, fifo);
+				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+			}
 
 			/* restore the video pipeline */
-			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
+			dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
+				  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+				  DSI_CMD_DMA_CTRL_LOW_POWER);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
 			dsi_sw_reset_restore(msm_host);
@@ -1398,9 +1412,6 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				iounmap(intf);
 			}
 			msleep(20);
-
-			if (done)
-				return len;
 		}
 	}
 
