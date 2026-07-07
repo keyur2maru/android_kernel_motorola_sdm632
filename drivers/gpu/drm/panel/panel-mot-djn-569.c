@@ -196,6 +196,7 @@ static int djn_569_off(struct djn_569 *ctx)
 static int djn_569_disable(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
+	int ret;
 
 	if (!ctx->enabled)
 		return 0;
@@ -205,6 +206,14 @@ static int djn_569_disable(struct drm_panel *panel)
 		backlight_update_status(ctx->backlight);
 	}
 
+	/* The off commands go out from disable(), while the video engine
+	 * is still running, for the same command-DMA scheduling reason
+	 * the init sequence is sent from enable().
+	 */
+	ret = djn_569_off(ctx);
+	if (ret < 0)
+		dev_err(panel->dev, "failed to set panel off: %d\n", ret);
+
 	ctx->enabled = false;
 
 	return 0;
@@ -213,14 +222,9 @@ static int djn_569_disable(struct drm_panel *panel)
 static int djn_569_unprepare(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
-	int ret;
 
 	if (!ctx->prepared)
 		return 0;
-
-	ret = djn_569_off(ctx);
-	if (ret < 0)
-		dev_err(panel->dev, "failed to set panel off: %d\n", ret);
 
 	if (ctx->hbm_gpio)
 		gpiod_set_value_cansleep(ctx->hbm_gpio, 0);
@@ -260,18 +264,6 @@ static int djn_569_prepare(struct drm_panel *panel)
 
 	djn_569_reset(ctx);
 
-	ret = djn_569_on(ctx);
-	if (ret < 0) {
-		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
-		gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
-		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies),
-				       ctx->supplies);
-		return ret;
-	}
-
-	if (ctx->bklt_en_gpio)
-		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 1);
-
 	ctx->prepared = true;
 
 	return 0;
@@ -280,9 +272,27 @@ static int djn_569_prepare(struct drm_panel *panel)
 static int djn_569_enable(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
+	int ret;
 
 	if (ctx->enabled)
 		return 0;
+
+	/* The init sequence is sent from enable(), after the host has
+	 * started the video engine, not from prepare(): on this
+	 * controller the command DMA fetch is only serviced when the
+	 * transmit scheduler has a slot, which the running video engine
+	 * provides (BLLP insertion).  With the link idle the DMA engine
+	 * sits busy forever and never fetches.  The downstream driver
+	 * sends every panel command with the video engine running.
+	 */
+	ret = djn_569_on(ctx);
+	if (ret < 0) {
+		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
+		return ret;
+	}
+
+	if (ctx->bklt_en_gpio)
+		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 1);
 
 	if (ctx->backlight) {
 		ctx->backlight->props.power = FB_BLANK_UNBLANK;
