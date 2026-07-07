@@ -555,6 +555,20 @@ static int _msm_smmu_create_mapping(struct msm_smmu_client *client,
 		return PTR_ERR(client->mmu_mapping);
 	}
 
+	{
+		/* A display translation fault (a scanout racing a buffer
+		 * free during teardown) must terminate the transaction,
+		 * not BUG the kernel: without this attribute
+		 * arm_smmu_context_fault() escalates any fault on the
+		 * domain to a fatal one.
+		 */
+		int non_fatal = 1;
+
+		iommu_domain_set_attr(client->mmu_mapping->domain,
+				      DOMAIN_ATTR_NON_FATAL_FAULTS,
+				      &non_fatal);
+	}
+
 	/* DOMAIN_ATTR_USE_UPSTREAM_HINT is deliberately not set: the quirk
 	 * switches the leaf ptes to the implementation-defined qcom memory
 	 * attribute (MAIR attr 0xf4) and a non-shareable walk, and the
