@@ -1293,7 +1293,9 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	bool triggered;
 
 	if (cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) {
+		struct msm_mmu *mmu = priv->kms->aspace->mmu;
 		struct iommu_domain *dom;
+		phys_addr_t phys;
 
 		ret = msm_gem_get_iova(msm_host->tx_gem_obj,
 				priv->kms->aspace, &dma_base);
@@ -1303,20 +1305,24 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		}
 
 		/*
-		 * This SoC's DSI command-DMA master is in SMMU bypass: it
-		 * fetches the command buffer with a physical address, not the
-		 * SMMU iova drm/msm normally programs.  Feeding it the iova
-		 * stalls the fetch (CMD_MODE_DMA_BUSY latched, DMA FIFO empty,
-		 * the command never clocks out); the buffer's backing physical
-		 * address completes.  Scanout is unaffected because the MDP is a
-		 * separate, translated master.  Translate the just-mapped iova to
-		 * its physical address for the DMA.  DSI commands are single
-		 * small packets that never leave the buffer's first page, so the
-		 * base translation covers the whole transfer.
+		 * The command buffer is mapped into the display aspace once at
+		 * DSI host init, but this SoC's DSI command-DMA context does not
+		 * see that early mapping in hardware: a DMA from the iova stalls
+		 * with the command FIFO empty (the fetch never returns) and the
+		 * SMMU's own ATOS translation of the iova returns 0, while
+		 * scanout - remapped late, per frame - works.  Re-map the
+		 * buffer's backing physical page as an identity mapping now, at
+		 * command time, once the context is fully attached, and fetch the
+		 * command from that address.  Idempotent across commands (the map
+		 * returns -EBUSY once present, which is fine).
 		 */
-		dom = msm_smmu_get_domain(priv->kms->aspace->mmu);
-		if (dom)
-			dma_base = iommu_iova_to_phys(dom, dma_base);
+		dom = msm_smmu_get_domain(mmu);
+		phys = dom ? iommu_iova_to_phys(dom, dma_base) : 0;
+		if (phys && mmu->funcs->one_to_one_map) {
+			mmu->funcs->one_to_one_map(mmu, phys, phys,
+						   msm_host->tx_size, IOMMU_READ);
+			dma_base = phys;
+		}
 	} else {
 		dma_base = msm_host->tx_buf_paddr;
 	}
