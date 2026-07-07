@@ -35,6 +35,7 @@ struct djn_569 {
 	struct gpio_desc *bklt_en_gpio;
 	struct gpio_desc *hbm_gpio;
 	bool prepared;
+	bool init_failed;
 	bool enabled;
 };
 
@@ -285,9 +286,18 @@ static int djn_569_enable(struct drm_panel *panel)
 	 * sits busy forever and never fetches.  The downstream driver
 	 * sends every panel command with the video engine running.
 	 */
+	if (ctx->init_failed)
+		return -ENODEV;
+
 	ret = djn_569_on(ctx);
 	if (ret < 0) {
 		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
+		/* Latch the failure: every retry parks another DMA
+		 * transaction on the fabric and eventually starves other
+		 * bus masters (USB dies), so fail fast and leave the link
+		 * quiet after the first attempt.
+		 */
+		ctx->init_failed = true;
 		return ret;
 	}
 

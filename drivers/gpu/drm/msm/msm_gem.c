@@ -161,8 +161,17 @@ static void put_pages(struct drm_gem_object *obj)
 
 	if (msm_obj->pages) {
 		if (msm_obj->sgt) {
-			/* Balance the dma_map_sg() done in sync_for_device(). */
-			if (msm_obj->flags & (MSM_BO_WC|MSM_BO_UNCACHED))
+			/* Balance the dma_map_sg() done in sync_for_device()
+			 * - but only while the sg still carries that
+			 * mapping's identity cookies.  An smmu-client aspace
+			 * map (msm_smmu_map_dma_buf) rewrites dma_address
+			 * with iommu iovas, and unmapping those against the
+			 * dma-direct device invalidates a bogus virtual
+			 * address and panics.
+			 */
+			if ((msm_obj->flags & (MSM_BO_WC|MSM_BO_UNCACHED)) &&
+			    sg_dma_address(msm_obj->sgt->sgl) ==
+			    sg_phys(msm_obj->sgt->sgl))
 				dma_unmap_sg(obj->dev->dev, msm_obj->sgt->sgl,
 					msm_obj->sgt->nents, DMA_BIDIRECTIONAL);
 			sg_free_table(msm_obj->sgt);
