@@ -1304,58 +1304,56 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	}
 
 	/*
-	 * One-shot clock-lane-HS-force probe (first command only).
+	 * One-shot coherent-config probe over an idle link (first command only).
 	 *
-	 * Command DMA hangs in BOTH LP and HS, idle or during video: the bytes
-	 * reach the FIFO and the DMA kicks off, but they never clock onto the
-	 * lanes.  The downstream host forces the DSI clock lane into HS around
-	 * every command DMA (mdss_dsi_start_hs_clk_lane sets LANE_CTRL bit28
-	 * CLKLN_HS_FORCE_REQUEST before the trigger, mdss_dsi_stop_hs_clk_lane
-	 * clears it after); this driver leaves LANE_CTRL=0, so the command bytes
-	 * have no HS clock to shift out of the FIFO and the DMA stalls.  Its
-	 * fifo-empty check 0x11110000 matches our stuck fifo=0x11111000, and the
-	 * clklane-stop/datalane-stop polling is the same LANE_STATUS (ctrl+0xa8).
-	 *
-	 * Test the fix two ways on the first command: mode 0 keeps the video
-	 * pipeline live (downstream-faithful - it never idles the link per
-	 * command), mode 1 idles the link first (stop INTF + drop VID_MODE_EN +
-	 * dsi_sw_reset so the data lanes can reach LP-11 stop).  Each forces
-	 * LANE_CTRL CLKLN_HS_FORCE_REQUEST, checks the data-lane stop state
-	 * (LANE_STATUS & 0xf == 0xf), sends the command, and logs the result.  A
-	 * COMPLETED result identifies the clock-lane HS force as the missing step.
+	 * Earlier probes mixed incoherent settings (clock lane forced HS while
+	 * sending an LP command, or an HS command with the clock lane left in LP),
+	 * and all hung.  Test the two legitimate ways to send a command, both over
+	 * an idled link (stop INTF + drop VID_MODE_EN + dsi_sw_reset so the data
+	 * lanes reach LP-11 stop):
+	 *   config HS: force the clock lane HS (LANE_CTRL CLKLN_HS_FORCE_REQUEST)
+	 *              and send an HS command (CMD_DMA_CTRL without LOW_POWER) -
+	 *              mirrors the downstream mdss_dsi_start_hs_clk_lane path.
+	 *   config LP: leave the clock lane in LP (LANE_CTRL=0) and send an LP
+	 *              escape command (CMD_DMA_CTRL LOW_POWER) - the self-clocked
+	 *              escape path used by command-mode panels.
+	 * Both check the data-lane stop state (LANE_STATUS & 0xf == 0xf) and log
+	 * the result; whichever COMPLETES is the working transmit path.
 	 */
 	{
-		static bool clk_probed;
+		static bool cfg_probed;
 
-		if (!clk_probed) {
+		if (!cfg_probed) {
+			void __iomem *intf = ioremap(0x01a6b800, 0x10);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			int mode;
+			int cfg;
 
-			clk_probed = true;
+			cfg_probed = true;
 
-			for (mode = 0; mode < 2; mode++) {
-				void __iomem *intf = NULL;
+			/* idle the link once */
+			if (intf) {
+				writel_relaxed(0, intf + 0x0);
+				wmb();
+			}
+			dsi_write(msm_host, REG_DSI_CTRL,
+				  ctrl_sav & ~DSI_CTRL_VID_MODE_EN);
+			wmb();
+			dsi_sw_reset(msm_host);
+			wmb();
+			msleep(20);
+
+			for (cfg = 0; cfg < 2; cfg++) {
+				bool hs = (cfg == 0);
 				unsigned long jend;
 				u32 ls, st, fifo;
 				int done = 0, stopped;
 
-				if (mode == 1) {
-					intf = ioremap(0x01a6b800, 0x10);
-					if (intf) {
-						writel_relaxed(0, intf + 0x0);
-						wmb();
-					}
-					dsi_write(msm_host, REG_DSI_CTRL,
-						  ctrl_sav & ~DSI_CTRL_VID_MODE_EN);
-					wmb();
-					dsi_sw_reset(msm_host);
-					wmb();
-					msleep(20);
-				}
+				dsi_sw_reset(msm_host);		/* flush previous attempt */
+				wmb();
+				msleep(5);
 
-				/* force the clock lane to HS for the DMA */
 				dsi_write(msm_host, REG_DSI_LANE_CTRL,
-					  DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
+					  hs ? DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST : 0);
 				wmb();
 				usleep_range(1000, 1100);
 
@@ -1364,7 +1362,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 				dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
 					  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
-					  DSI_CMD_DMA_CTRL_LOW_POWER);
+					  (hs ? 0 : DSI_CMD_DMA_CTRL_LOW_POWER));
 				wmb();
 
 				reinit_completion(&msm_host->dma_comp);
@@ -1397,27 +1395,29 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 				st = dsi_read(msm_host, REG_DSI_STATUS0);
 				fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-				pr_err("%s: CLKFORCE PROBE[%s]: %s lane_status=0x%x stopped=%d status0=0x%x fifo=0x%x\n",
-				       __func__, mode == 0 ? "video" : "idle",
+				pr_err("%s: CFG PROBE[%s]: %s lane_status=0x%x stopped=%d status0=0x%x fifo=0x%x\n",
+				       __func__, hs ? "HS-clkforce" : "LP-noforce",
 				       done ? "COMPLETED" : "hung",
 				       ls, stopped, st, fifo);
 
 				dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
 				dsi_write(msm_host, REG_DSI_LANE_CTRL, 0);
 				wmb();
-
-				if (mode == 1) {
-					dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
-					wmb();
-					dsi_sw_reset_restore(msm_host);
-					if (intf) {
-						writel_relaxed(1, intf + 0x0);
-						wmb();
-						iounmap(intf);
-					}
-					msleep(20);
-				}
 			}
+
+			/* restore the video pipeline */
+			dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
+				  DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+				  DSI_CMD_DMA_CTRL_LOW_POWER);
+			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
+			wmb();
+			dsi_sw_reset_restore(msm_host);
+			if (intf) {
+				writel_relaxed(1, intf + 0x0);
+				wmb();
+				iounmap(intf);
+			}
+			msleep(20);
 		}
 	}
 
