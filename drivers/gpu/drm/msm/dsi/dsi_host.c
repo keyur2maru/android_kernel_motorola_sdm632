@@ -1432,101 +1432,100 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 					dma_base) });
 			}
 
-			/* One-shot: soft-reset the controller and reprogram
-			 * it in the downstream host_init register order, then
-			 * retry the transfer once through the FIFO path.
-			 * Every register already holds the working-reference
-			 * value, so a retry that completes indicts internal
-			 * state latched by this driver's original programming
-			 * order; a retry that hangs clears the ordering
-			 * hypothesis.  Raw = accessor + 4 (io_offset).
+			/* One-shot experiment matrix: retry a FIFO-sourced
+			 * transfer under engine-restart permutations.  Every
+			 * working reference initializes the panel on a video
+			 * pipeline inherited live from the bootloader, while
+			 * this driver stops the timing engines at KMS init and
+			 * rebuilds from cold - the last uncompared variable.
 			 */
 			{
-				static bool reprogrammed;
+				static bool cycled;
 
-				if (!reprogrammed) {
-					static const u16 order[] = {
-						0x00c, 0x010, 0x01c, 0x080,
-						0x0ac, 0x0c0, 0x0c8, 0x0b8,
-						0x108, 0x10c, 0x118
-					};
-					u32 saved[ARRAY_SIZE(order)];
-					u32 ctrl_sav, intr2;
-					int k;
+				if (!cycled) {
+					void __iomem *intf =
+						ioremap(0x01a6b800, 0x100);
+					u32 ctrl_sav = dsi_read(msm_host, 0x000);
+					u32 *pl = msm_gem_get_vaddr(
+						msm_host->tx_gem_obj);
+					int step;
 
-					reprogrammed = true;
-					for (k = 0; k < ARRAY_SIZE(order); k++)
-						saved[k] = dsi_read(msm_host,
-								    order[k]);
-					ctrl_sav = dsi_read(msm_host, 0x000);
+					cycled = true;
+					for (step = 0; intf && pl && !IS_ERR(pl) &&
+					     step < 3; step++) {
+						u32 j, intr2;
 
-					dsi_write(msm_host, 0x000, 0);
-					wmb();
-					dsi_write(msm_host, 0x114, 1);
-					wmb();
-					udelay(100);
-					dsi_write(msm_host, 0x114, 0);
-					wmb();
-					udelay(100);
-
-					for (k = 0; k < ARRAY_SIZE(order); k++)
-						dsi_write(msm_host, order[k],
-							  saved[k]);
-					dsi_write(msm_host, 0x000, ctrl_sav);
-					wmb();
-					msleep(20);
-
-					/* refill the FIFO with the same
-					 * payload and retrigger
-					 */
-					{
-						u32 *pl = msm_gem_get_vaddr(
-							msm_host->tx_gem_obj);
-						u32 j;
-
-						if (pl && !IS_ERR(pl)) {
-							dsi_write(msm_host,
-								  0x158,
-								  BIT(16) |
-								  BIT(17) |
-								  BIT(2) |
-								  BIT(1));
-							for (j = 0; j < len;
-							     j += 4) {
-								dsi_write(msm_host, 0x178, pl[j / 4]);
-								wmb();
-							}
-							if ((len % 8) != 0) {
-								dsi_write(msm_host, 0x178, 0);
-								wmb();
-							}
-							dsi_write(msm_host,
-								  REG_DSI_DMA_LEN,
-								  len);
-							dsi_write(msm_host,
-								  REG_DSI_TRIG_DMA,
-								  1);
+						if (step == 1) {
+							/* cycle the dsi video engine */
+							dsi_write(msm_host, 0x000,
+								  ctrl_sav & ~BIT(1));
 							wmb();
-							msleep(50);
+							msleep(40);
+							dsi_write(msm_host, 0x000,
+								  ctrl_sav);
+							wmb();
+							msleep(40);
+						} else if (step == 2) {
+							/* cycle both, interface first */
+							dsi_write(msm_host, 0x000,
+								  ctrl_sav & ~BIT(1));
+							writel_relaxed(0, intf + 0x0);
+							wmb();
+							msleep(40);
+							writel_relaxed(1, intf + 0x0);
+							wmb();
+							msleep(20);
+							dsi_write(msm_host, 0x000,
+								  ctrl_sav);
+							wmb();
+							msleep(40);
 						}
-					}
 
-					intr2 = dsi_read(msm_host,
-							 REG_DSI_INTR_CTRL);
-					pr_err("%s: reordered retry: %s (status0=0x%x intr=0x%x fifo=0x%x)\n",
-					       __func__,
-					       (intr2 & DSI_IRQ_CMD_DMA_DONE) ?
-					       "COMPLETED" : "hung",
-					       dsi_read(msm_host,
-							REG_DSI_STATUS0),
-					       intr2,
-					       dsi_read(msm_host,
-							REG_DSI_FIFO_STATUS));
-					dsi_write(msm_host, 0x1e8, 1);
-					wmb();
-					dsi_write(msm_host, 0x1e8, 0);
-					wmb();
-					dsi_write(msm_host, 0x158, 0);
+						dsi_write(msm_host, 0x158,
+							  BIT(16) | BIT(17) |
+							  BIT(2) | BIT(1));
+						wmb();
+						for (j = 0; j < len; j += 4) {
+							dsi_write(msm_host, 0x178,
+								  pl[j / 4]);
+							wmb();
+						}
+						if ((len % 8) != 0) {
+							dsi_write(msm_host, 0x178, 0);
+							wmb();
+						}
+						intr2 = dsi_read(msm_host,
+							REG_DSI_INTR_CTRL);
+						dsi_write(msm_host, REG_DSI_INTR_CTRL,
+							  (intr2 & ~BIT(1)) | BIT(0));
+						wmb();
+						dsi_write(msm_host, REG_DSI_DMA_LEN,
+							  len);
+						dsi_write(msm_host, REG_DSI_TRIG_DMA,
+							  1);
+						wmb();
+						msleep(40);
+						intr2 = dsi_read(msm_host,
+							REG_DSI_INTR_CTRL);
+						pr_err("%s: cycle step %d: %s (status0=0x%x fifo=0x%x)\n",
+						       __func__, step,
+						       (intr2 & DSI_IRQ_CMD_DMA_DONE) ?
+						       "COMPLETED" : "hung",
+						       dsi_read(msm_host,
+								REG_DSI_STATUS0),
+						       dsi_read(msm_host,
+								REG_DSI_FIFO_STATUS));
+						dsi_write(msm_host, 0x1e8, 1);
+						wmb();
+						dsi_write(msm_host, 0x1e8, 0);
+						wmb();
+						dsi_write(msm_host, 0x158, 0);
+						wmb();
+						if (intr2 & DSI_IRQ_CMD_DMA_DONE)
+							break;
+					}
+					if (intf)
+						iounmap(intf);
 				}
 			}
 
