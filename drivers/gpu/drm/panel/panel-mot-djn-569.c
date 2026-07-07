@@ -500,7 +500,7 @@ static int djn_569_probe(struct mipi_dsi_device *dsi)
 	 * and the downstream stack run this panel with (VID_CFG0 live
 	 * value 0x80009130: traffic mode 1 + last-line-interleave).
 	 */
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO |
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM;
 
 	ret = djn_569_add(ctx);
