@@ -330,14 +330,7 @@ static int djn_569_enable(struct drm_panel *panel)
 }
 
 static const struct drm_display_mode djn_569_mode = {
-	/* 93.75MHz, not the computed 94.00MHz: the bootloader programs
-	 * the link PLL for a 562.5Mbps bit clock (byte clock 70.3125MHz,
-	 * measured 70.32 on the running downstream stack, which inherits
-	 * the bootloader PLL via continuous splash and never re-locks),
-	 * and every configuration this panel has ever demonstrably
-	 * accepted commands under runs at that rate.  59.84Hz effective.
-	 */
-	.clock = 93750,
+	.clock = (720 + 220 + 12 + 72) * (1512 + 8 + 2 + 8) * 60 / 1000,
 	.hdisplay = 720,
 	.hsync_start = 720 + 220,
 	.hsync_end = 720 + 220 + 12,
