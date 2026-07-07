@@ -996,6 +996,8 @@ static void dsi_timing_setup(struct msm_dsi_host *msm_host)
 	}
 }
 
+static void dsi_sw_reset_restore(struct msm_dsi_host *msm_host);
+
 static void dsi_sw_reset(struct msm_dsi_host *msm_host)
 {
 	dsi_write(msm_host, REG_DSI_CLK_CTRL, DSI_CLK_CTRL_ENABLE_CLKS);
@@ -1305,21 +1307,25 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	 * One-shot idle-link LP-escape probe (first command only).
 	 *
 	 * During active video the command bytes are queued but the data lanes
-	 * never reach LP-11 STOP (lane_status stopstate bits = 0), so no LP
-	 * escape window ever opens and the DMA hangs to the 200ms timeout.  The
-	 * one path that was never actually tested is a genuinely idle link: the
-	 * earlier attempts either cleared only the DSI VID_MODE_EN (the MDP INTF
-	 * keeps streaming pixels, so the lanes stay HS) or restarted the INTF
-	 * before sending.  Here the INTF timing engine is stopped as well, so the
-	 * lanes can settle to LP-11, while the bus clocks stay forced on
-	 * (dsi_clk_ctrl is held across the transfer by xfer_prepare) so the LP
-	 * escape has an esc clock - the failure mode the pre-video attempt hit.
+	 * never reach LP-11 STOP, so no LP escape window opens and the DMA hangs
+	 * to the 200ms timeout.  The one path never actually tested is a
+	 * genuinely idle link.  Clearing the DSI VID_MODE_EN is not enough: a
+	 * running video engine keeps STATUS0 VIDEO_MODE_BUSY set and blocks the
+	 * command engine, which is why the #61 probe still read status0=0xb.
+	 * msm_dsi_host_disable() documents the fix - after disabling the INTF and
+	 * clearing the video enable it issues dsi_sw_reset() to actually stop the
+	 * video engine so the command engine is free.  Mirror that here: stop the
+	 * MDP INTF timing engine, drop VID_MODE_EN (keeping ENABLE|CMD_MODE_EN),
+	 * sw-reset to flush the video engine, then send the command over the idle
+	 * link with the bus clocks still forced on (dsi_clk_ctrl held by
+	 * xfer_prepare).  idle_status0 confirms VIDEO_MODE_BUSY actually cleared;
+	 * lane_status (true LANE_STATUS at ctrl+0xa4) shows whether the lanes
+	 * reached LP-11 stop.
 	 *
-	 * A COMPLETED result means LP escape works once the lanes can stop, so
-	 * panel init has to run over an idle link before the video engine starts;
-	 * a hung result with the lanes confirmed in stop pins the fault on the LP
-	 * escape path itself (esc clock / PHY LP).  Either way the pipeline is
-	 * restored and, on failure, the normal send is retried below.
+	 * COMPLETED -> LP escape works once the lanes can stop, so panel init has
+	 * to run over an idle link before the video engine starts; hung with the
+	 * video engine stopped and lanes in stop pins the fault on the LP escape
+	 * path itself (esc clock / PHY LP).  The pipeline is restored afterwards.
 	 */
 	{
 		static bool idle_probed;
@@ -1327,7 +1333,7 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		if (!idle_probed) {
 			void __iomem *intf = ioremap(0x01a6b800, 0x10);
 			u32 ctrl_sav = dsi_read(msm_host, REG_DSI_CTRL);
-			u32 ls_before, st, fifo;
+			u32 idle_st0, ls, st, fifo;
 			unsigned long jend;
 			int done = 0;
 
@@ -1340,9 +1346,12 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			dsi_write(msm_host, REG_DSI_CTRL,
 				  ctrl_sav & ~DSI_CTRL_VID_MODE_EN);
 			wmb();
-			msleep(30);				/* let the link drain to LP-11 */
+			dsi_sw_reset(msm_host);			/* actually stop the video engine */
+			wmb();
+			msleep(20);				/* let the lanes settle to LP-11 */
 
-			ls_before = dsi_read(msm_host, REG_DSI_LANE_CTRL - 0x4);
+			idle_st0 = dsi_read(msm_host, REG_DSI_STATUS0);
+			ls = dsi_read(msm_host, 0xa0);		/* ctrl+0xa4 = LANE_STATUS */
 
 			reinit_completion(&msm_host->dma_comp);
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
@@ -1374,13 +1383,15 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 
 			st = dsi_read(msm_host, REG_DSI_STATUS0);
 			fifo = dsi_read(msm_host, REG_DSI_FIFO_STATUS);
-			pr_err("%s: IDLE-LINK PROBE: %s lane_status_before=0x%x status0=0x%x fifo=0x%x\n",
+			pr_err("%s: IDLE-LINK PROBE: %s idle_status0=0x%x lane_status=0x%x end_status0=0x%x fifo=0x%x\n",
 			       __func__, done ? "COMPLETED" : "hung",
-			       ls_before, st, fifo);
+			       idle_st0, ls, st, fifo);
 
+			/* restore the video pipeline */
 			dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
 			dsi_write(msm_host, REG_DSI_CTRL, ctrl_sav);
 			wmb();
+			dsi_sw_reset_restore(msm_host);
 			if (intf) {
 				writel_relaxed(1, intf + 0x0);	/* INTF timing engine on */
 				wmb();
