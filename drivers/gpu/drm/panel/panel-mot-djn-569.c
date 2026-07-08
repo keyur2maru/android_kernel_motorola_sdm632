@@ -203,23 +203,19 @@ static int djn_569_off(struct djn_569 *ctx)
 static int djn_569_disable(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
-	int ret;
 
 	if (!ctx->enabled)
 		return 0;
 
-	if (ctx->backlight) {
-		ctx->backlight->props.power = FB_BLANK_POWERDOWN;
-		backlight_update_status(ctx->backlight);
-	}
-
-	/* The off commands go out from disable(), while the video engine
-	 * is still running, for the same command-DMA scheduling reason
-	 * the init sequence is sent from enable().
+	/*
+	 * Keep the panel lit across Android's blank/unblank cycles.  The command
+	 * path is dead, so the off sequence cannot be sent and - more importantly
+	 * - the panel cannot be re-initialised afterwards (bringup relies on the
+	 * bootloader init, see prepare()/enable()).  Skip the off commands and
+	 * leave the backlight as-is; only track state.
 	 */
-	ret = djn_569_off(ctx);
-	if (ret < 0)
-		dev_err(panel->dev, "failed to set panel off: %d\n", ret);
+	if (0)
+		djn_569_off(ctx);
 
 	ctx->enabled = false;
 
@@ -233,13 +229,19 @@ static int djn_569_unprepare(struct drm_panel *panel)
 	if (!ctx->prepared)
 		return 0;
 
-	if (ctx->hbm_gpio)
-		gpiod_set_value_cansleep(ctx->hbm_gpio, 0);
-	if (ctx->bklt_en_gpio)
+	/*
+	 * Do NOT reset or power off the panel.  Bringup relies on the bootloader
+	 * init, which cannot be re-sent over the dead command path, so once the
+	 * panel is reset (reset_gpio) or its bias rails are cut it goes dark for
+	 * good.  Leave reset de-asserted, the vsp/vsn/vddio rails on and the
+	 * backlight enabled so the panel survives Android's blank cycles; only
+	 * track state here.
+	 */
+	if (0) {
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 0);
-	gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
-
-	regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+		gpiod_set_raw_value_cansleep(ctx->reset_gpio, 0);
+		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+	}
 
 	ctx->prepared = false;
 
