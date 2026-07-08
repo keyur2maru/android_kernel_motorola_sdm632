@@ -269,7 +269,17 @@ static int djn_569_prepare(struct drm_panel *panel)
 	}
 	usleep_range(10000, 11000);
 
-	djn_569_reset(ctx);
+	/*
+	 * Do NOT pulse reset: the command-DMA engine on this controller never
+	 * schedules a transmit onto the lanes (the DMA fetches the packet fine
+	 * now but the video engine's scheduler never inserts it), so re-init
+	 * cannot be sent.  The bootloader already initialised this panel for its
+	 * splash; keep that state by holding the rails on without resetting, and
+	 * just drive the video stream at it.  A reset would drop the panel to an
+	 * uninitialised state we cannot recover from over the dead command path.
+	 */
+	if (0)
+		djn_569_reset(ctx);
 
 	ctx->prepared = true;
 
@@ -279,7 +289,6 @@ static int djn_569_prepare(struct drm_panel *panel)
 static int djn_569_enable(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
-	int ret;
 
 	if (ctx->enabled)
 		return 0;
@@ -288,40 +297,12 @@ static int djn_569_enable(struct drm_panel *panel)
 		return -ENODEV;
 
 	/*
-	 * The init sequence is sent from enable(), after the host has started
-	 * the video engine, so the MDSS pipeline (and its AXI/SMMU clocks) is
-	 * live and the command DMA can fetch the buffer.  The host idles just
-	 * the DSI video engine around each command DMA (msm_dsi_host_xfer_*),
-	 * so the data lanes drop to LP-11 for the LP escape write while the
-	 * INTF keeps the pipeline clocked - the LP init writes go out even
-	 * though the panel runs in video mode.
+	 * Skip re-init: the command path cannot transmit on this controller, and
+	 * the panel is already initialised by the bootloader (see prepare()).
+	 * Just bring the backlight up and let the video stream drive the panel.
 	 */
-	ret = djn_569_on(ctx);
-	if (ret < 0) {
-		dev_err(panel->dev, "failed to initialize panel: %d\n", ret);
-		/* Latch the failure: every retry parks another DMA transaction
-		 * on the fabric and eventually starves other bus masters (USB
-		 * dies), so fail fast and leave the link quiet after the first
-		 * attempt.
-		 */
-		ctx->init_failed = true;
-		return ret;
-	}
-
-	/* Non-fatal init receipt check: 0x9c means sleep-out and
-	 * display-on landed.  HS read, as the clock lane is force-HS
-	 * while video runs.
-	 */
-	{
-		u8 pwr = 0;
-
-		ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-		ret = mipi_dsi_dcs_read(ctx->dsi, MIPI_DCS_GET_POWER_MODE,
-					&pwr, 1);
-		ctx->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
-		dev_info(panel->dev, "power mode after init: ret=%d 0x%02x\n",
-			 ret, pwr);
-	}
+	if (0)
+		djn_569_on(ctx);
 
 	if (ctx->bklt_en_gpio)
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 1);
