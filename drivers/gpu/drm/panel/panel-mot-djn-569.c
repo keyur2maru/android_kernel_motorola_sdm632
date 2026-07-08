@@ -104,7 +104,13 @@ static int djn_569_on(struct djn_569 *ctx)
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	int ret;
 
-	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+	/*
+	 * Send init in HS: the per-line power-stop windows let the command DMA
+	 * fetch the whole packet (the FIFO fills), but an LP escape at the 19.2
+	 * MHz escape clock is too slow to drain it within one line's short
+	 * horizontal blanking.  A fast HS burst fits the window and completes.
+	 */
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
 	dsi_generic_write_seq(dsi, 0xff, 0x23);
 	dsi_generic_write_seq(dsi, 0xfb, 0x01);
