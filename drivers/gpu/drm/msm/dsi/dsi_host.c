@@ -856,11 +856,18 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	 * video panel, so the DMA fetches the packet but never clocks it onto
 	 * the lanes - the command transmit never completes.
 	 */
-	if (!(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO)) {
-		if ((cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) &&
-			(cfg_hnd->minor >= MSM_DSI_6G_VER_MINOR_V1_2))
-			data |= DSI_TRIG_CTRL_BLOCK_DMA_WITHIN_FRAME;
-	}
+	/*
+	 * BLOCK_DMA_WITHIN_FRAME defers a SW-triggered command DMA to the frame
+	 * boundary (blanking) instead of letting it fire during active pixel
+	 * transmit.  A video-mode panel that sends its init DCS while the video
+	 * engine runs needs this too: without it the command sits
+	 * CMD_MODE_DMA_BUSY through the video HS burst (the lanes are busy with
+	 * pixels) and never clocks out; with it the DMA waits for the per-line
+	 * BLLP and inserts there.
+	 */
+	if ((cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) &&
+		(cfg_hnd->minor >= MSM_DSI_6G_VER_MINOR_V1_2))
+		data |= DSI_TRIG_CTRL_BLOCK_DMA_WITHIN_FRAME;
 	dsi_write(msm_host, REG_DSI_TRIG_CTRL, data);
 
 	data = DSI_CLKOUT_TIMING_CTRL_T_CLK_POST(phy_shared_timings->clk_post) |
@@ -890,17 +897,13 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	dsi_write(msm_host, 0xbc - DSI_6G_REG_SHIFT, 0x3fd08);
 
 	/*
-	 * DSI_DMA_FIFO_CTRL (0x50): command DMA FIFO read watermark.  The
-	 * downstream host writes 0x30 ("read watermark 15/16 full") at the
-	 * end of host init; mainline msm never programs it, leaving the
-	 * watermark at reset (0).  With no read watermark the command DMA
-	 * engine's drain logic never releases the FIFO to the link, so the
-	 * transfer sits with CMD_MODE_DMA_BUSY set and the FIFO full while
-	 * nothing clocks out - the exact command-DMA-never-completes hang.
-	 * Not covered by any register dump, so it survived every readback
-	 * comparison; the write-stream trace showed it missing.
+	 * DSI_DMA_FIFO_CTRL (0x50) is left at its reset value 0: the working
+	 * downstream stack runs with 0 here (register dump), and a non-zero read
+	 * watermark makes the command DMA engine wait for the FIFO to reach that
+	 * fill level before draining to the link - an 8-byte init command never
+	 * reaches a 15/16 threshold, so it sits CMD_MODE_DMA_BUSY with the FIFO
+	 * full and never clocks out.
 	 */
-	dsi_write(msm_host, 0x50 - DSI_6G_REG_SHIFT, 0x30);
 
 	/* allow only ack-err-status to generate interrupt */
 	dsi_write(msm_host, REG_DSI_ERR_INT_MASK0, 0x13ff3fe0);
@@ -1324,18 +1327,6 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 			return ret;
 		}
 
-		/*
-		 * The command buffer is mapped into the display aspace once at
-		 * DSI host init, but this SoC's DSI command-DMA context does not
-		 * see that early mapping in hardware: a DMA from the iova stalls
-		 * with the command FIFO empty (the fetch never returns) and the
-		 * SMMU's own ATOS translation of the iova returns 0, while
-		 * scanout - remapped late, per frame - works.  Re-map the
-		 * buffer's backing physical page as an identity mapping now, at
-		 * command time, once the context is fully attached, and fetch the
-		 * command from that address.  Idempotent across commands (the map
-		 * returns -EBUSY once present, which is fine).
-		 */
 		dom = msm_smmu_get_domain(mmu);
 		phys = dom ? iommu_iova_to_phys(dom, dma_base) : 0;
 		if (phys && mmu->funcs->one_to_one_map) {

@@ -105,12 +105,13 @@ static int djn_569_on(struct djn_569 *ctx)
 	int ret;
 
 	/*
-	 * Send init in HS: the per-line power-stop windows let the command DMA
-	 * fetch the whole packet (the FIFO fills), but an LP escape at the 19.2
-	 * MHz escape clock is too slow to drain it within one line's short
-	 * horizontal blanking.  A fast HS burst fits the window and completes.
+	 * Send the init in LP escape mode (mode_flags keeps MIPI_DSI_MODE_LPM).
+	 * The working downstream host drives the panel init as an LP command-DMA
+	 * transfer: CMD_DMA_CTRL LOW_POWER is set and the clock lane is left in LP
+	 * (LANE_CTRL 0).  Forcing the lanes to HS for these init writes blocks the
+	 * LP escape entry on this 14nm PHY, so the command engine goes busy but no
+	 * packet ever clocks out.
 	 */
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
 	dsi_generic_write_seq(dsi, 0xff, 0x23);
 	dsi_generic_write_seq(dsi, 0xfb, 0x01);
@@ -275,17 +276,11 @@ static int djn_569_prepare(struct drm_panel *panel)
 		djn_569_reset(ctx);
 
 	/*
-	 * Send the panel DCS init in command mode, before the video engine
-	 * starts (this runs from bridge pre_enable, ahead of host_enable).  The
-	 * command DMA previously never clocked onto the lanes because TRIG_CTRL
-	 * bit31 (TE) was set on this TE-less video panel, gating the SW trigger;
-	 * with that removed the transmit completes and the panel can be brought
-	 * out of its half-configured bootloader state into its native mode.
+	 * The DCS init is deferred to enable().  The command DMA fills its FIFO
+	 * from memory only while the video engine is running, so the init is sent
+	 * once video is up; in LP mode each command inserts into the per-line BLLP
+	 * window where the lanes drop out of the video HS burst.
 	 */
-	ret = djn_569_on(ctx);
-	if (ret < 0)
-		dev_err(panel->dev, "panel init failed: %d\n", ret);
-
 	ctx->prepared = true;
 
 	return 0;
@@ -294,20 +289,20 @@ static int djn_569_prepare(struct drm_panel *panel)
 static int djn_569_enable(struct drm_panel *panel)
 {
 	struct djn_569 *ctx = to_djn_569(panel);
+	int ret;
 
 	if (ctx->enabled)
 		return 0;
 
-	if (ctx->init_failed)
-		return -ENODEV;
-
 	/*
-	 * Skip re-init: the command path cannot transmit on this controller, and
-	 * the panel is already initialised by the bootloader (see prepare()).
-	 * Just bring the backlight up and let the video stream drive the panel.
+	 * Send the DCS init with the video engine running (the command DMA only
+	 * fills its FIFO once video transmits) and in LP mode, so each command
+	 * inserts into the per-line BLLP window instead of contending with the
+	 * video HS burst.  Left non-fatal so the bootloader-lit panel survives.
 	 */
-	if (0)
-		djn_569_on(ctx);
+	ret = djn_569_on(ctx);
+	if (ret < 0)
+		dev_err(panel->dev, "panel init failed: %d\n", ret);
 
 	if (ctx->bklt_en_gpio)
 		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 1);
