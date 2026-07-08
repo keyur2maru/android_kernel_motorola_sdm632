@@ -448,8 +448,16 @@ static int djn_569_add(struct djn_569 *ctx)
 		return ret;
 	}
 
+	/*
+	 * Come up with the backlight ON, matching the bootloader (the splash is
+	 * live at hand-off).  Requesting it low here would black the panel out
+	 * for the whole kernel+init+SF startup, until enable() drives it high on
+	 * SF's first commit.  Keeping it lit means the backlight never goes off
+	 * between the bootloader splash and the boot animation; disable() still
+	 * drops it on a real screen-off.
+	 */
 	ctx->bklt_en_gpio = devm_gpiod_get_optional(dev, "bklt-en",
-						    GPIOD_OUT_LOW);
+						    GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->bklt_en_gpio)) {
 		ret = PTR_ERR(ctx->bklt_en_gpio);
 		dev_err(dev, "failed to get bklt-en-gpios: %d\n", ret);
