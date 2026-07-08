@@ -705,6 +705,18 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 			fb->base.id, src_x, src_y, src_w, src_h,
 			crtc->base.id, crtc_x, crtc_y, crtc_w, crtc_h);
 
+	{
+		static int mdp5_geom_logn;
+
+		if (mdp5_geom_logn < 12) {
+			mdp5_geom_logn++;
+			pr_err("MDP5GEOM %s pipe=%d fb=%ux%u pitch=%u fmt=0x%x src=%u,%u %ux%u -> crtc=%d,%d %ux%u\n",
+			       mdp5_plane->name, pipe, fb->width, fb->height,
+			       fb->pitches[0], pix_format, src_x, src_y, src_w,
+			       src_h, crtc_x, crtc_y, crtc_w, crtc_h);
+		}
+	}
+
 	/* Request some memory from the SMP: */
 	if (mdp5_kms->smp) {
 		ret = mdp5_smp_request(mdp5_kms->smp,
