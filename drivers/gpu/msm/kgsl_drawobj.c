@@ -202,7 +202,19 @@ static bool drawobj_sync_expire(struct kgsl_device *device,
 	 * for dispatch
 	 */
 	if (!kgsl_drawobj_events_pending(event->syncobj)) {
-		del_timer_sync(&syncobj->timer);
+		/*
+		 * This can run from the fence signal callback in hard-irq context
+		 * (a gpu fence chained to the display vblank event fires from
+		 * mdp5_crtc_vblank_irq).  del_timer_sync() there warns and then
+		 * busy-spins try_to_del_timer_sync() inside the irq, stalling the
+		 * vblank handler so no further vblank/flip events are delivered and
+		 * the compositor freezes.  del_timer() is sufficient here: the
+		 * canary only prints a debug deadlock message and guards itself
+		 * with kref_get_unless_zero(), and drawobj_destroy_sync() still
+		 * does the authoritative del_timer_sync() before the syncobj is
+		 * freed.
+		 */
+		del_timer(&syncobj->timer);
 
 		if (device->ftbl->drawctxt_sched)
 			device->ftbl->drawctxt_sched(device,
