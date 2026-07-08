@@ -847,12 +847,15 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 	data |= DSI_TRIG_CTRL_MDP_TRIGGER(TRIGGER_NONE);
 	data |= DSI_TRIG_CTRL_DMA_TRIGGER(TRIGGER_SW);
 	data |= DSI_TRIG_CTRL_STREAM(msm_host->channel);
-	/* te_sel: the downstream host sets TRIG_CTRL bit31 (0x80000004) for
-	 * this panel; the traced write stream confirms it.  It does not
-	 * gate the SW-triggered command DMA (stock SW-triggers with it set)
-	 * but is part of the register state the panel is initialised under.
+	/*
+	 * Do NOT set DSI_TRIG_CTRL_TE (bit31) on this video-mode panel.  The
+	 * downstream host only sets it when the panel declares a TE line
+	 * (pinfo->te_sel), and its command-DMA trigger path writes a clean
+	 * TRIG_CTRL=0x04 before every kickoff.  With TE set, the SW-triggered
+	 * command DMA waits for a tearing-effect strobe that never arrives on a
+	 * video panel, so the DMA fetches the packet but never clocks it onto
+	 * the lanes - the command transmit never completes.
 	 */
-	data |= DSI_TRIG_CTRL_TE;
 	if (!(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO)) {
 		if ((cfg_hnd->major == MSM_DSI_VER_MAJOR_6G) &&
 			(cfg_hnd->minor >= MSM_DSI_6G_VER_MINOR_V1_2))
@@ -2722,29 +2725,6 @@ int msm_dsi_host_enable(struct mipi_dsi_host *host)
 				iounmap(d);
 			if (p)
 				iounmap(p);
-		}
-	}
-
-	/*
-	 * DSI video-mode built-in test pattern.  Fill the whole active region
-	 * with solid red from inside the DSI controller (register 0x15c/0x164),
-	 * bypassing the MDP pixel feed entirely.  This bisects the pipeline: if
-	 * the panel shows FULL-WIDTH red the DSI/PHY/panel output is fine and the
-	 * half-width comes from the MDP feed; if it shows HALF-WIDTH red the fault
-	 * is in the DSI/PHY -> panel output itself.  Mirrors the downstream
-	 * mdss_dsi_video_test_pattern(): GEN_CTRL=0x21, VIDEO_INIT_VAL=0xff0000.
-	 * Left enabled so the pattern persists for observation.
-	 */
-	{
-		void __iomem *d = ioremap(0x01a94000, 0x200);
-
-		if (d) {
-			writel_relaxed(0x00ff0000, d + 0x164);
-			writel_relaxed(0x00000021, d + 0x15c);
-			writel_relaxed(0x00000001, d + 0x180);
-			wmb();
-			iounmap(d);
-			pr_err("DSITPG: video test pattern (red) enabled\n");
 		}
 	}
 

@@ -271,17 +271,20 @@ static int djn_569_prepare(struct drm_panel *panel)
 	}
 	usleep_range(10000, 11000);
 
-	/*
-	 * Do NOT pulse reset: the command-DMA engine on this controller never
-	 * schedules a transmit onto the lanes (the DMA fetches the packet fine
-	 * now but the video engine's scheduler never inserts it), so re-init
-	 * cannot be sent.  The bootloader already initialised this panel for its
-	 * splash; keep that state by holding the rails on without resetting, and
-	 * just drive the video stream at it.  A reset would drop the panel to an
-	 * uninitialised state we cannot recover from over the dead command path.
-	 */
 	if (0)
 		djn_569_reset(ctx);
+
+	/*
+	 * Send the panel DCS init in command mode, before the video engine
+	 * starts (this runs from bridge pre_enable, ahead of host_enable).  The
+	 * command DMA previously never clocked onto the lanes because TRIG_CTRL
+	 * bit31 (TE) was set on this TE-less video panel, gating the SW trigger;
+	 * with that removed the transmit completes and the panel can be brought
+	 * out of its half-configured bootloader state into its native mode.
+	 */
+	ret = djn_569_on(ctx);
+	if (ret < 0)
+		dev_err(panel->dev, "panel init failed: %d\n", ret);
 
 	ctx->prepared = true;
 
