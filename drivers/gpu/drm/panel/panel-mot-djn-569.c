@@ -374,21 +374,30 @@ static int djn_569_bl_update_status(struct backlight_device *bl)
 	u16 brightness = bl->props.brightness;
 	int ret;
 
+	static bool dcs_dead;
+
 	if (bl->props.power != FB_BLANK_UNBLANK ||
 	    bl->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK))
 		brightness = 0;
 
 	/*
-	 * The command-DMA path cannot transmit on this controller (see the panel
-	 * prepare()/enable() notes), so a brightness DCS write here just stalls to
-	 * the 200ms timeout on every Android backlight update, blanking/stuttering
-	 * the display.  The panel keeps the bootloader's brightness; skip the DCS
-	 * write until the command path works.
+	 * Brightness is DCS-only on this panel (bl_ctrl_dcs, no WLED/PWM), so it
+	 * needs a runtime DCS 0x51 while video streams.  With VID_CFG0
+	 * LAST_LINE_INTERLEAVE set the command DMA may now insert during the last
+	 * line's blanking.  If the transfer still cannot drain it times out; latch
+	 * that once and stop trying, so a dead command path fails a single update
+	 * instead of stalling ~200ms on every Android backlight change.
 	 */
-	(void)brightness;
-	(void)ret;
-	if (0)
-		ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
+	if (dcs_dead)
+		return 0;
+
+	ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
+	if (ret < 0) {
+		dcs_dead = true;
+		dev_warn(&dsi->dev,
+			 "brightness DCS failed (%d); runtime brightness disabled\n",
+			 ret);
+	}
 
 	return 0;
 }

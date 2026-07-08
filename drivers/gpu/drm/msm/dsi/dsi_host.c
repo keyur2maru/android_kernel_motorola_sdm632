@@ -820,6 +820,13 @@ static void dsi_ctrl_config(struct msm_dsi_host *msm_host, bool enable,
 		data |= DSI_VID_CFG0_TRAFFIC_MODE(dsi_get_traffic_mode(flags));
 		data |= DSI_VID_CFG0_DST_FORMAT(dsi_get_vid_fmt(mipi_fmt));
 		data |= DSI_VID_CFG0_VIRT_CHANNEL(msm_host->channel);
+		/*
+		 * Let a command DMA share the last video line's blanking - the
+		 * working downstream/bootloader runs this panel with VID_CFG0 bit31
+		 * set (live value 0x80009130).  Needed for any runtime DCS (e.g.
+		 * brightness) to insert while video streams.
+		 */
+		data |= DSI_VID_CFG0_LAST_LINE_INTERLEAVE;
 		dsi_write(msm_host, REG_DSI_VID_CFG0, data);
 
 		/* Do not swap RGB colors */
