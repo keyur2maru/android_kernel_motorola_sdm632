@@ -2691,6 +2691,40 @@ int msm_dsi_host_enable(struct mipi_dsi_host *host)
 	dsi_op_mode_config(msm_host,
 		!!(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO), true);
 
+	/*
+	 * One-shot: the composited framebuffer is correct full-width (screencap
+	 * proven) but the panel shows it half-width + colour-shifted, so the
+	 * corruption is in the DSI/PHY output.  Dump the DSI horizontal + lane
+	 * config and the PHY common/lane state so the lane count / timing / map
+	 * can be checked against the (bootloader-initialised) panel's expectation.
+	 */
+	{
+		static bool dumped;
+
+		if (!dumped) {
+			void __iomem *d = ioremap(0x01a94000, 0x120);
+			void __iomem *p = ioremap(0x01a94400, 0x400);
+			int i;
+
+			dumped = true;
+			pr_err("DSIEN lanes=%d fmt=%d mode_flags=0x%lx byte=%u\n",
+			       msm_host->lanes, msm_host->format,
+			       msm_host->mode_flags, msm_host->byte_clk_rate);
+			for (i = 0; d && i < 0x120; i += 16)
+				pr_err("DSIEN c +0x%03x: %08x %08x %08x %08x\n", i,
+				       readl_relaxed(d + i), readl_relaxed(d + i + 4),
+				       readl_relaxed(d + i + 8), readl_relaxed(d + i + 12));
+			for (i = 0; p && i < 0x400; i += 16)
+				pr_err("DSIEN p +0x%03x: %08x %08x %08x %08x\n", i,
+				       readl_relaxed(p + i), readl_relaxed(p + i + 4),
+				       readl_relaxed(p + i + 8), readl_relaxed(p + i + 12));
+			if (d)
+				iounmap(d);
+			if (p)
+				iounmap(p);
+		}
+	}
+
 	/* TODO: clock should be turned off for command mode,
 	 * and only turned on before MDP START.
 	 * This part of code should be enabled once mdp driver support it.
