@@ -295,12 +295,15 @@ static int djn_569_enable(struct drm_panel *panel)
 		return 0;
 
 	/*
-	 * Send the DCS init with the video engine running (the command DMA only
-	 * fills its FIFO once video transmits) and in LP mode, so each command
-	 * inserts into the per-line BLLP window instead of contending with the
-	 * video HS burst.  Left non-fatal so the bootloader-lit panel survives.
+	 * Pure bootloader-trust: send NO DCS at all.  The bootloader ran the
+	 * full Novatek CMD2 init (continuous splash) before handoff, so the
+	 * panel is already initialised; this build tests whether matching the
+	 * bootloader's non-burst traffic mode (see probe) yields full-width
+	 * output on its own, isolating the traffic mode from the CMD2 init.
 	 */
-	ret = djn_569_on(ctx);
+	ret = 0;
+	if (0)
+		ret = djn_569_on(ctx);
 	if (ret < 0)
 		dev_err(panel->dev, "panel init failed: %d\n", ret);
 
@@ -481,22 +484,20 @@ static int djn_569_probe(struct mipi_dsi_device *dsi)
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
-	/* Non-burst sync-event, matching the traffic mode the bootloader
-	 * and the downstream stack run this panel with (VID_CFG0 live
-	 * value 0x80009130: traffic mode 1 + last-line-interleave).
-	 */
 	/*
-	 * Request LP power-stop during the horizontal front/back porch and sync
-	 * as well (VID_CFG0 HFP/HBP/HSA_POWER_STOP): with only the frame BLLP
-	 * powering the lanes down, the data lanes stay in HS almost continuously
-	 * and a command DMA gets at most one insertion window per frame, which is
-	 * not enough for it to complete (it only ever partially fetches).  Powering
-	 * the lanes to LP-11 during every line's blanking gives the command engine
-	 * a BLLP escape window on every line so the init packets clock out.
+	 * Drive the exact traffic mode the working downstream stack runs this
+	 * panel with: non-burst sync-event, no per-line HSA/HBP/HFP power-stop.
+	 * dsi_get_traffic_mode() returns NON_BURST_SYNCH_EVENT (=1) when neither
+	 * MODE_VIDEO_BURST nor MODE_VIDEO_SYNC_PULSE is set, so VID_CFG0 becomes
+	 * 0x..9130 (EOF_BLLP | BLLP | traffic 1 | RGB888) - byte-identical to the
+	 * ground-truth live value 0x80009130 the bootloader initialised the panel
+	 * for.  The burst + per-line power-stop flags were added for command-DMA
+	 * BLLP insertion windows; this build sends no commands, so match the
+	 * bootloader's pixel packing instead - the CMD2 GOA/source timing the
+	 * bootloader loaded was tuned for non-burst, and a burst stream against a
+	 * non-burst-configured DDIC is the leading suspect for the half-width.
 	 */
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			  MIPI_DSI_MODE_VIDEO_HSA | MIPI_DSI_MODE_VIDEO_HBP |
-			  MIPI_DSI_MODE_VIDEO_HFP |
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO |
 			  MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM;
 
 	ret = djn_569_add(ctx);
