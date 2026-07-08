@@ -1057,6 +1057,23 @@ static void dsi_set_tx_power_mode(int mode, struct msm_dsi_host *msm_host)
 		data |= DSI_CMD_DMA_CTRL_LOW_POWER;
 
 	dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL, data);
+
+	/*
+	 * An HS command transfer has to clock out on the data lanes, which
+	 * requires the clock lane in HS.  On a non-continuous-clock panel the
+	 * clock lane sits in LP between transfers, so a standalone HS command
+	 * has no HS clock and the DMA hangs (STATUS0 stays CMD_MODE_DMA_BUSY).
+	 * Force the clock lane HS around an HS command and release it again for
+	 * LP transfers (and so the data lanes can reach LP-11 between commands).
+	 * Continuous-clock panels already hold the clock lane in HS.
+	 */
+	if (msm_host->mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS) {
+		dsi_write(msm_host, REG_DSI_LANE_CTRL,
+			  mode == 0 ? DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST : 0);
+		wmb(); /* clock lane HS request in place before the transfer */
+		if (mode == 0)
+			udelay(20); /* let the clock lane ramp into HS */
+	}
 }
 
 static void dsi_wait4video_done(struct msm_dsi_host *msm_host)
