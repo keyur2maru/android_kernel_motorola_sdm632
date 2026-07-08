@@ -4502,14 +4502,31 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 		 */
 		if (smmu->options & ARM_SMMU_OPT_SKIP_INIT) {
 			u32 smr;
+			u16 id;
 
 			for (i = 0; i < size; i++) {
 				smr = readl_relaxed(gr0_base +
 						    ARM_SMMU_GR0_SMR(i));
 				if (!(smr & SMR_VALID))
 					continue;
-				smmu->smrs[i].id = (smr >> SMR_ID_SHIFT) &
-						   smmu->streamid_mask;
+				id = (smr >> SMR_ID_SHIFT) &
+				     smmu->streamid_mask;
+				/*
+				 * apps_iommu is shared: the display master
+				 * (SID 0x0Cxx) is the only one whose bootloader
+				 * mapping we must inherit to avoid a double SMR
+				 * match.  Importing every live SMR also marks
+				 * the camera masters' slots (SID 0x0400/0x1800/
+				 * 0x1c00, msm8953-camera.dtsi) occupied, which
+				 * perturbs their runtime SMR allocation and
+				 * breaks camera SMMU attach.  Restrict the
+				 * inherit to the display SID so every other
+				 * master allocates exactly as it did before the
+				 * drm/msm display bring-up.
+				 */
+				if ((id & 0xff00) != 0x0c00)
+					continue;
+				smmu->smrs[i].id = id;
 				smmu->smrs[i].mask = (smr >> SMR_MASK_SHIFT) &
 						     smmu->smr_mask_mask;
 				smmu->smrs[i].valid = true;
