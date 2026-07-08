@@ -104,13 +104,7 @@ static int djn_569_on(struct djn_569 *ctx)
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	int ret;
 
-	/*
-	 * Send the init sequence in HS, not LP: the command DMA fetch on this
-	 * controller only runs while the video engine streams, and with the
-	 * engine running the data lanes never drop to LP-11 for an LP escape.
-	 * An HS command inserts into the video HS blanking and completes.
-	 */
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	dsi_generic_write_seq(dsi, 0xff, 0x23);
 	dsi_generic_write_seq(dsi, 0xfb, 0x01);
@@ -507,7 +501,18 @@ static int djn_569_probe(struct mipi_dsi_device *dsi)
 	 * and the downstream stack run this panel with (VID_CFG0 live
 	 * value 0x80009130: traffic mode 1 + last-line-interleave).
 	 */
+	/*
+	 * Request LP power-stop during the horizontal front/back porch and sync
+	 * as well (VID_CFG0 HFP/HBP/HSA_POWER_STOP): with only the frame BLLP
+	 * powering the lanes down, the data lanes stay in HS almost continuously
+	 * and a command DMA gets at most one insertion window per frame, which is
+	 * not enough for it to complete (it only ever partially fetches).  Powering
+	 * the lanes to LP-11 during every line's blanking gives the command engine
+	 * a BLLP escape window on every line so the init packets clock out.
+	 */
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+			  MIPI_DSI_MODE_VIDEO_HSA | MIPI_DSI_MODE_VIDEO_HBP |
+			  MIPI_DSI_MODE_VIDEO_HFP |
 			  MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM;
 
 	ret = djn_569_add(ctx);
