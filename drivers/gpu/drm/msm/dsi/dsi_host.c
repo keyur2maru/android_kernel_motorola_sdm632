@@ -2725,6 +2725,29 @@ int msm_dsi_host_enable(struct mipi_dsi_host *host)
 		}
 	}
 
+	/*
+	 * DSI video-mode built-in test pattern.  Fill the whole active region
+	 * with solid red from inside the DSI controller (register 0x15c/0x164),
+	 * bypassing the MDP pixel feed entirely.  This bisects the pipeline: if
+	 * the panel shows FULL-WIDTH red the DSI/PHY/panel output is fine and the
+	 * half-width comes from the MDP feed; if it shows HALF-WIDTH red the fault
+	 * is in the DSI/PHY -> panel output itself.  Mirrors the downstream
+	 * mdss_dsi_video_test_pattern(): GEN_CTRL=0x21, VIDEO_INIT_VAL=0xff0000.
+	 * Left enabled so the pattern persists for observation.
+	 */
+	{
+		void __iomem *d = ioremap(0x01a94000, 0x200);
+
+		if (d) {
+			writel_relaxed(0x00ff0000, d + 0x164);
+			writel_relaxed(0x00000021, d + 0x15c);
+			writel_relaxed(0x00000001, d + 0x180);
+			wmb();
+			iounmap(d);
+			pr_err("DSITPG: video test pattern (red) enabled\n");
+		}
+	}
+
 	/* TODO: clock should be turned off for command mode,
 	 * and only turned on before MDP START.
 	 * This part of code should be enabled once mdp driver support it.
