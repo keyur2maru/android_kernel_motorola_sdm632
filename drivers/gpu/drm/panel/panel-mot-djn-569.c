@@ -368,19 +368,16 @@ static int djn_569_bl_update_status(struct backlight_device *bl)
 		brightness = 0;
 
 	/*
-	 * Runtime backlight updates run while the video stream is active, and on
-	 * this board the clock lane is force-HS during video (dsi_op_mode_config
-	 * CLKLN_HS_FORCE_REQUEST) because the 14nm PHY won't auto-engage HS for a
-	 * non-continuous clock.  With the clock lane held HS the data lanes cannot
-	 * do an LP escape, so an LP DCS write here stalls (-ETIMEDOUT).  Send the
-	 * brightness DCS in HS instead -- it has a valid HS byte clock during
-	 * video.  (The init-time brightness=0 write in djn_569_on() stays LP; it
-	 * runs in the LP init phase before the clock lane is forced HS.)
+	 * The command-DMA path cannot transmit on this controller (see the panel
+	 * prepare()/enable() notes), so a brightness DCS write here just stalls to
+	 * the 200ms timeout on every Android backlight update, blanking/stuttering
+	 * the display.  The panel keeps the bootloader's brightness; skip the DCS
+	 * write until the command path works.
 	 */
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
-	if (ret < 0)
-		return ret;
+	(void)brightness;
+	(void)ret;
+	if (0)
+		ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
 
 	return 0;
 }
