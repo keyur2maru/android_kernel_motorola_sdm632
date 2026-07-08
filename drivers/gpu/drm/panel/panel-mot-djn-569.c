@@ -209,14 +209,22 @@ static int djn_569_disable(struct drm_panel *panel)
 		return 0;
 
 	/*
-	 * Keep the panel lit across Android's blank/unblank cycles.  The command
-	 * path is dead, so the off sequence cannot be sent and - more importantly
-	 * - the panel cannot be re-initialised afterwards (bringup relies on the
-	 * bootloader init, see prepare()/enable()).  Skip the off commands and
-	 * leave the backlight as-is; only track state.
+	 * Turn the backlight off on screen-off.  This gates only the LED (the
+	 * bklt-en line to the backlight driver and the backlight device); it does
+	 * NOT reset the DDIC or cut its bias rails, so the bootloader panel init
+	 * survives and enable() lights it back up.  The DCS off sequence is still
+	 * skipped: brightness/off is bl_ctrl_dcs on this panel and the runtime
+	 * command path is dead, but on/off does not need it.
 	 */
 	if (0)
 		djn_569_off(ctx);
+
+	if (ctx->backlight) {
+		ctx->backlight->props.power = FB_BLANK_POWERDOWN;
+		backlight_update_status(ctx->backlight);
+	}
+	if (ctx->bklt_en_gpio)
+		gpiod_set_value_cansleep(ctx->bklt_en_gpio, 0);
 
 	ctx->enabled = false;
 
