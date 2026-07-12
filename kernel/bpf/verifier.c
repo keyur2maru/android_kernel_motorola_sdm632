@@ -10243,8 +10243,14 @@ int bpf_check(struct bpf_prog **prog, union bpf_attr *attr,
 
 	if (!btf_vmlinux && IS_ENABLED(CONFIG_DEBUG_INFO_BTF)) {
 		mutex_lock(&bpf_verifier_lock);
-		if (!btf_vmlinux)
+		if (!btf_vmlinux) {
 			btf_vmlinux = btf_parse_vmlinux();
+			if (IS_ERR(btf_vmlinux)) {
+				pr_warn("bpf: failed to parse vmlinux BTF: %ld\n",
+					PTR_ERR(btf_vmlinux));
+				btf_vmlinux = NULL;
+			}
+		}
 		mutex_unlock(&bpf_verifier_lock);
 	}
 
