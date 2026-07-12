@@ -35,6 +35,8 @@
 #include <linux/mm.h>
 #include <asm/cacheflush.h>
 
+#include <trace/events/gpu_mem.h>
+
 #include "kgsl.h"
 #include "kgsl_debugfs.h"
 #include "kgsl_log.h"
@@ -330,6 +332,33 @@ static void kgsl_destroy_anon(struct kgsl_memdesc *memdesc)
 	}
 }
 
+static atomic_long_t kgsl_gpu_mem_total;
+
+/*
+ * Track a @delta byte change to a process' gpu allocation and emit the
+ * gpu_mem_total tracepoint. The global counter (reported with pid 0) is the
+ * running sum across all processes; the per process value is the sum of that
+ * process' per usermem type stats, which the caller has already updated.
+ */
+static void kgsl_trace_gpu_mem_total(struct kgsl_process_private *priv,
+		int64_t delta)
+{
+	uint64_t total;
+	unsigned int i;
+
+	total = atomic_long_add_return(delta, &kgsl_gpu_mem_total);
+	trace_gpu_mem_total(0, 0, total);
+
+	if (!priv)
+		return;
+
+	total = 0;
+	for (i = 0; i < KGSL_MEM_ENTRY_MAX; i++)
+		total += priv->stats[i].cur;
+
+	trace_gpu_mem_total(0, pid_nr(priv->pid), total);
+}
+
 void
 kgsl_mem_entry_destroy(struct kref *kref)
 {
@@ -472,6 +501,8 @@ static void kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry)
 	entry->priv->stats[type].cur -= entry->memdesc.size;
 
 	spin_unlock(&entry->priv->mem_lock);
+
+	kgsl_trace_gpu_mem_total(entry->priv, -(int64_t)entry->memdesc.size);
 
 	kgsl_mmu_put_gpuaddr(&entry->memdesc);
 
@@ -2526,6 +2557,7 @@ long kgsl_ioctl_gpuobj_import(struct kgsl_device_private *dev_priv,
 	kgsl_process_add_stats(private,
 		kgsl_memdesc_usermem_type(&entry->memdesc),
 		entry->memdesc.size);
+	kgsl_trace_gpu_mem_total(private, entry->memdesc.size);
 
 	trace_kgsl_mem_map(entry, fd);
 
@@ -2828,6 +2860,7 @@ long kgsl_ioctl_map_user_mem(struct kgsl_device_private *dev_priv,
 
 	kgsl_process_add_stats(private,
 			kgsl_memdesc_usermem_type(&entry->memdesc), param->len);
+	kgsl_trace_gpu_mem_total(private, param->len);
 
 	trace_kgsl_mem_map(entry, param->fd);
 
@@ -3208,6 +3241,7 @@ struct kgsl_mem_entry *gpumem_alloc_entry(
 	kgsl_process_add_stats(private,
 			kgsl_memdesc_usermem_type(&entry->memdesc),
 			entry->memdesc.size);
+	kgsl_trace_gpu_mem_total(private, entry->memdesc.size);
 	trace_kgsl_mem_alloc(entry);
 
 	kgsl_mem_entry_commit_process(entry);
