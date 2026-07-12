@@ -21,6 +21,7 @@
 #include "kgsl.h"
 #include "kgsl_sharedmem.h"
 #include "adreno.h"
+#include "adreno_gpu_work.h"
 #include "adreno_ringbuffer.h"
 #include "adreno_trace.h"
 #include "kgsl_sharedmem.h"
@@ -2367,6 +2368,16 @@ static void retire_cmdobj(struct adreno_device *adreno_dev,
 			ADRENO_DRAWOBJ_RB(drawobj),
 			adreno_get_rptr(drawctxt->rb), cmdobj->fault_recovery);
 
+	/*
+	 * When drawobj profiling is active (all non-A3xx targets), start and end
+	 * hold the GPU always-on-timer ticks bounding this command's execution.
+	 * Attribute that GPU-active time to the submitting UID for the
+	 * power/gpu_work_period tracepoint.
+	 */
+	if (end > start && drawobj->context->proc_priv)
+		adreno_gpu_work_period_account(drawobj->context->proc_priv->uid,
+			end - start);
+
 	drawctxt->submit_retire_ticks[drawctxt->ticks_index] =
 		end - cmdobj->submit_ticks;
 
@@ -2707,6 +2718,8 @@ void adreno_dispatcher_close(struct adreno_device *adreno_dev)
 
 	mutex_unlock(&dispatcher->mutex);
 
+	adreno_gpu_work_close();
+
 	kobject_put(&dispatcher->kobj);
 }
 
@@ -2876,6 +2889,8 @@ int adreno_dispatcher_init(struct adreno_device *adreno_dev)
 
 	ret = kobject_init_and_add(&dispatcher->kobj, &ktype_dispatcher,
 		&device->dev->kobj, "dispatch");
+
+	adreno_gpu_work_init();
 
 	return ret;
 }

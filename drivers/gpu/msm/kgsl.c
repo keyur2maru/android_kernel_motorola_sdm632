@@ -33,6 +33,8 @@
 #include <linux/compat.h>
 #include <linux/ctype.h>
 #include <linux/mm.h>
+#include <linux/cred.h>
+#include <linux/user_namespace.h>
 #include <asm/cacheflush.h>
 
 #include <trace/events/gpu_mem.h>
@@ -978,6 +980,7 @@ static struct kgsl_process_private *kgsl_process_private_new(
 	kref_init(&private->refcount);
 
 	private->pid = cur_pid;
+	private->uid = from_kuid(&init_user_ns, current_uid());
 	get_task_comm(private->comm, current->group_leader);
 
 	spin_lock_init(&private->mem_lock);
