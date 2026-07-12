@@ -151,7 +151,7 @@
 	novatek@62 {
 		compatible = "novatek,NVT-ts";
 		reg = <0x62>;
-		status = "disabled"; /* channel debug: skip touch i2c stall to speed eMMC probe */
+		status = "ok";
 		novatek,reset-gpio = <&tlmm 64 0x00>;
 		novatek,irq-gpio = <&tlmm 65 0x2001>;
 		pinctrl-names = "pmx_ts_active",
@@ -165,7 +165,7 @@
 	ilitek@41 {
 		compatible = "ilitek,tchip";
 		reg = <0x41>;
-		status = "disabled"; /* channel debug: not present on this unit, NACK-stalls the boot */
+		status = "ok";
 		ilitek,panel-coords = <0 0 720 1512>;
 		ilitek,display-coords = <0 0 720 1512>;
 		ilitek,irq-gpio = <&tlmm 65 0x2002>;
