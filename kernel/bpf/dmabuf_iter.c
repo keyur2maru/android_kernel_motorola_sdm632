@@ -50,7 +50,7 @@ struct bpf_iter__dmabuf {
 	__bpf_md_ptr(struct dma_buf *, dmabuf);
 };
 
-DEFINE_BPF_ITER_FUNC(dma_buf, struct bpf_iter_meta *meta, struct dma_buf *dmabuf)
+DEFINE_BPF_ITER_FUNC(dmabuf, struct bpf_iter_meta *meta, struct dma_buf *dmabuf)
 
 static int __dmabuf_seq_show(struct seq_file *seq, void *v, bool in_stop)
 {
@@ -115,7 +115,7 @@ static void dmabuf_iter_seq_fini(void *priv)
 static int __init dmabuf_iter_init(void)
 {
 	struct bpf_iter_reg reg_info = {
-		.target			= "dma_buf",
+		.target			= "dmabuf",
 		.seq_ops		= &dmabuf_iter_seq_ops,
 		.init_seq_private	= dmabuf_iter_seq_init,
 		.fini_seq_private	= dmabuf_iter_seq_fini,
