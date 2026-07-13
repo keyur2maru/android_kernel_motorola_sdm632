@@ -3481,6 +3481,19 @@ static int check_stack_boundary(struct bpf_verifier_env *env, int regno,
 				state->stack[spi].slot_type[j] = STACK_MISC;
 			goto mark;
 		}
+		/*
+		 * A spilled pointer may legitimately appear inside a helper's
+		 * memory argument, e.g. a %s/%p pointer placed in the data
+		 * buffer of bpf_seq_printf(): the 8 bytes are initialized and
+		 * only the pointer value is handed to the helper. Reading it is
+		 * safe, so allow it (and preserve the spill) for privileged
+		 * programs. Upstream added this for PTR_TO_BTF_ID in v5.10; a
+		 * BPF iterator also spills PTR_TO_STACK for the sanitized %s
+		 * string buffer, so permit any spilled pointer here.
+		 */
+		if (state->stack[spi].slot_type[0] == STACK_SPILL &&
+		    env->allow_ptr_leaks)
+			goto mark;
 
 err:
 		verbose(env, "invalid indirect read from stack off %d+%d size %d\n",
