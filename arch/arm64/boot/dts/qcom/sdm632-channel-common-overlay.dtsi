@@ -182,6 +182,7 @@
 	himax@48 {
 		compatible = "himax,hxcommon";
 		reg = <0x48>;
+		status = "disabled";
 		interrupt-parent = <&tlmm>;
 		interrupts = <65 0x2008>;
 		himax,panel-coords = <0 720 0 1512>;
