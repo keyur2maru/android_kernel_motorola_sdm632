@@ -5,10 +5,33 @@
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
 
+struct dmabuf_iter_priv {
+	/*
+	 * If this pointer is non-NULL, the buffer's refcount is elevated to
+	 * prevent destruction between stop/start. If reading is not resumed and
+	 * start is never called again, then dmabuf_iter_seq_fini drops the
+	 * reference when the iterator is released.
+	 */
+	struct dma_buf *dmabuf;
+};
+
 static void *dmabuf_iter_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	if (*pos)
-		return NULL;
+	struct dmabuf_iter_priv *p = seq->private;
+
+	if (*pos) {
+		struct dma_buf *dmabuf = p->dmabuf;
+
+		if (!dmabuf)
+			return NULL;
+
+		/*
+		 * Always resume from where we stopped, regardless of the value
+		 * of pos.
+		 */
+		p->dmabuf = NULL;
+		return dmabuf;
+	}
 
 	return dma_buf_iter_begin();
 }
@@ -54,8 +77,16 @@ static void dmabuf_iter_seq_stop(struct seq_file *seq, void *v)
 {
 	struct dma_buf *dmabuf = v;
 
-	if (dmabuf)
-		dma_buf_put(dmabuf);
+	/*
+	 * Hold onto the reference across stop so a resumed read continues from
+	 * the same buffer; the reference is dropped either on the next start or
+	 * by dmabuf_iter_seq_fini when the iterator is released.
+	 */
+	if (dmabuf) {
+		struct dmabuf_iter_priv *p = seq->private;
+
+		p->dmabuf = dmabuf;
+	}
 }
 
 static const struct seq_operations dmabuf_iter_seq_ops = {
@@ -65,14 +96,30 @@ static const struct seq_operations dmabuf_iter_seq_ops = {
 	.show	= dmabuf_iter_seq_show,
 };
 
+static int dmabuf_iter_seq_init(void *priv)
+{
+	struct dmabuf_iter_priv *p = priv;
+
+	p->dmabuf = NULL;
+	return 0;
+}
+
+static void dmabuf_iter_seq_fini(void *priv)
+{
+	struct dmabuf_iter_priv *p = priv;
+
+	if (p->dmabuf)
+		dma_buf_put(p->dmabuf);
+}
+
 static int __init dmabuf_iter_init(void)
 {
 	struct bpf_iter_reg reg_info = {
 		.target			= "dma_buf",
 		.seq_ops		= &dmabuf_iter_seq_ops,
-		.init_seq_private	= NULL,
-		.fini_seq_private	= NULL,
-		.seq_priv_size		= 0,
+		.init_seq_private	= dmabuf_iter_seq_init,
+		.fini_seq_private	= dmabuf_iter_seq_fini,
+		.seq_priv_size		= sizeof(struct dmabuf_iter_priv),
 	};
 
 	return bpf_iter_reg_target(&reg_info);
