@@ -349,8 +349,24 @@ struct vfs_cap_data {
 
 #define CAP_AUDIT_READ		37
 
+/*
+ * Allow system performance and observability privileged operations
+ * using perf_events, i915_perf and other kernel subsystems
+ */
 
-#define CAP_LAST_CAP         CAP_AUDIT_READ
+#define CAP_PERFMON		38
+
+/*
+ * CAP_BPF allows the following BPF operations:
+ * - Loading all types of BPF programs
+ * - Creating all types of BPF maps
+ * (see the kernel-doc in include/uapi/linux/capability.h for the full list)
+ */
+
+#define CAP_BPF			39
+
+
+#define CAP_LAST_CAP         CAP_BPF
 
 #define cap_valid(x) ((x) >= 0 && (x) <= CAP_LAST_CAP)
 

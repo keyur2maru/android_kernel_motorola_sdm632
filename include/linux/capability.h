@@ -247,7 +247,12 @@ extern bool ptracer_capable(struct task_struct *tsk, struct user_namespace *ns);
 
 static inline bool perfmon_capable(void)
 {
-	return capable(CAP_SYS_ADMIN);
+	return capable(CAP_PERFMON) || capable(CAP_SYS_ADMIN);
+}
+
+static inline bool bpf_capable(void)
+{
+	return capable(CAP_BPF) || capable(CAP_SYS_ADMIN);
 }
 
 /* audit system wants to get cap info from files as well */
