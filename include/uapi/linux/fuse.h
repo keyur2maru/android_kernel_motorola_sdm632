@@ -349,7 +349,6 @@ struct fuse_file_lock {
 #define FUSE_EXPLICIT_INVAL_DATA (1 << 25)
 #define FUSE_MAP_ALIGNMENT	(1 << 26)
 #define FUSE_SUBMOUNTS		(1 << 27)
-#define FUSE_PASSTHROUGH	(1 << 31)
 
 /**
  * CUSE INIT request/reply flags
@@ -609,7 +608,7 @@ struct fuse_create_in {
 struct fuse_open_out {
 	uint64_t	fh;
 	uint32_t	open_flags;
-	int32_t   passthrough_fd;
+	uint32_t	padding;
 };
 
 struct fuse_release_in {

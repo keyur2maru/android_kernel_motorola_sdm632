@@ -7,7 +7,6 @@
 */
 
 #include "fuse_i.h"
-#include "fuse_passthrough.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -525,8 +524,6 @@ ssize_t fuse_simple_request(struct fuse_mount *fm, struct fuse_args *args)
 			ret = args->out_args[args->out_numargs - 1].size;
 		}
 
-		if (req->passthrough_filp != NULL)
-			args->out_passthrough_filp = req->passthrough_filp;
 	}
 	fuse_put_request(req);
 
@@ -1950,7 +1947,6 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 	}
 	fuse_copy_finish(cs);
 
-	fuse_setup_passthrough(fc, req);
 
 
 	spin_lock(&fpq->lock);

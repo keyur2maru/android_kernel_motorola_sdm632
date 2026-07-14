@@ -221,8 +221,6 @@ struct fuse_file {
 	bool flock:1;
 
 	/* the read write file */
-	struct file *passthrough_filp;
-	bool passthrough_enabled;
 };
 
 /** One input argument of a request */
@@ -260,7 +258,6 @@ struct fuse_args {
 	bool may_block:1;
 	struct fuse_in_arg in_args[3];
 	struct fuse_arg out_args[2];
-	struct file *out_passthrough_filp;
 	void (*end)(struct fuse_mount *fm, struct fuse_args *args, int error);
 
 	/** Path used for completing d_canonical_path */
@@ -368,9 +365,6 @@ struct fuse_req {
 
 	/** Used to wake up the task waiting for completion of request*/
 	wait_queue_head_t waitq;
-
-	/** fuse passthrough file  */
-	struct file *passthrough_filp;
 
 	/** fuse_mount this request belongs to */
 	struct fuse_mount *fm;
@@ -615,9 +609,6 @@ struct fuse_conn {
 
 	/** handle fs handles killing suid/sgid/cap on write/chown/trunc */
 	unsigned handle_killpriv:1;
-
-	/** passthrough IO. */
-	unsigned passthrough:1;
 
 	/** cache READLINK responses in page cache */
 	unsigned cache_symlinks:1;
