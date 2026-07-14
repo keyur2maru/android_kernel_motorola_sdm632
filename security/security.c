@@ -1675,6 +1675,10 @@ struct security_hook_heads security_hook_heads __lsm_ro_after_init = {
 		LIST_HEAD_INIT(security_hook_heads.bprm_committing_creds),
 	.bprm_committed_creds =
 		LIST_HEAD_INIT(security_hook_heads.bprm_committed_creds),
+	.fs_context_dup =
+		LIST_HEAD_INIT(security_hook_heads.fs_context_dup),
+	.fs_context_parse_param =
+		LIST_HEAD_INIT(security_hook_heads.fs_context_parse_param),
 	.sb_alloc_security =
 		LIST_HEAD_INIT(security_hook_heads.sb_alloc_security),
 	.sb_free_security =
