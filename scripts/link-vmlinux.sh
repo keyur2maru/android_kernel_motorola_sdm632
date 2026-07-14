@@ -181,15 +181,18 @@ gen_btf()
 	local pahole_ver;
 	local pahole_flags;
 
+	# A missing or too-old pahole must be fatal, not a warning: the link would otherwise succeed with an
+	# empty .BTF section, and the failure only surfaces much later as BPF programs failing to load with
+	# "failed to parse vmlinux BTF: -22" on a booted device.
 	if ! [ -x "$(command -v ${PAHOLE})" ]; then
-		info "BTF" "${1}: pahole (${PAHOLE}) is not available"
-		return 1
+		echo >&2 "BTF: ${1}: pahole (${PAHOLE}) is not available, but CONFIG_DEBUG_INFO_BTF is enabled"
+		exit 1
 	fi
 
 	pahole_ver=$(${PAHOLE} --version | sed -E 's/v([0-9]+)\.([0-9]+)/\1\2/')
 	if [ "${pahole_ver}" -lt "113" ]; then
-		info "BTF" "${1}: pahole version $(${PAHOLE} --version) is too old, need at least v1.13"
-		return 1
+		echo >&2 "BTF: ${1}: pahole $(${PAHOLE} --version) is too old, need at least v1.13"
+		exit 1
 	fi
 
 	# This kernel's BTF verifier knows kinds up to BTF_KIND_DATASEC(15), and
@@ -203,7 +206,19 @@ gen_btf()
 
 	info "BTF" ${2}
 	vmlinux_link "" ${1}
-	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${pahole_flags} ${1}
+	if ! LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${pahole_flags} ${1}; then
+		echo >&2 "BTF: ${1}: pahole failed to encode BTF"
+		exit 1
+	fi
+	# A pahole that runs but encodes nothing (a PATH wrapper that refuses to exec, say) leaves a
+	# zero-length .BTF that only surfaces as -EINVAL when a BPF program is loaded on a booted device.
+	${OBJCOPY} --dump-section .BTF=.tmp_btf.check ${1} 2>/dev/null
+	if [ ! -s .tmp_btf.check ]; then
+		rm -f .tmp_btf.check
+		echo >&2 "BTF: ${1}: pahole encoded an empty .BTF section"
+		exit 1
+	fi
+	rm -f .tmp_btf.check
 
 	# Create ${2} which contains just .BTF section but no symbols. Add
 	# SHF_ALLOC because .BTF will be part of the vmlinux image. --strip-all
