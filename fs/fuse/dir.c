@@ -249,38 +249,33 @@ invalid:
  * look up paths on its own. Instead, we handle the lookup as a special case
  * inside of the write request.
  */
-static void fuse_dentry_canonical_path(const struct path *path, struct path *canonical_path) {
+static void fuse_dentry_canonical_path(const struct path *path,
+				       struct path *canonical_path)
+{
 	struct inode *inode = path->dentry->d_inode;
 	struct fuse_conn *fc = get_fuse_conn(inode);
-	struct fuse_req *req;
-	int err;
+	FUSE_ARGS(args);
 	char *path_name;
+	int err;
 
-	req = fuse_get_req(fc, 1);
-	err = PTR_ERR(req);
-	if (IS_ERR(req))
+	path_name = (char *)__get_free_page(GFP_KERNEL);
+	if (!path_name)
 		goto default_path;
 
-	path_name = (char*)__get_free_page(GFP_KERNEL);
-	if (!path_name) {
-		fuse_put_request(fc, req);
-		goto default_path;
-	}
+	args.opcode = FUSE_CANONICAL_PATH;
+	args.nodeid = get_node_id(inode);
+	args.in_numargs = 0;
+	args.out_numargs = 1;
+	args.out_args[0].size = PATH_MAX;
+	args.out_args[0].value = path_name;
+	args.canonical_path = canonical_path;
+	args.out_argvar = 1;
 
-	req->in.h.opcode = FUSE_CANONICAL_PATH;
-	req->in.h.nodeid = get_node_id(inode);
-	req->in.numargs = 0;
-	req->out.numargs = 1;
-	req->out.args[0].size = PATH_MAX;
-	req->out.args[0].value = path_name;
-	req->canonical_path = canonical_path;
-	req->out.argvar = 1;
-	fuse_request_send(fc, req);
-	err = req->out.h.error;
-	fuse_put_request(fc, req);
+	err = fuse_simple_request(fc, &args);
 	free_page((unsigned long)path_name);
-	if (!err)
+	if (err > 0)
 		return;
+
 default_path:
 	canonical_path->dentry = path->dentry;
 	canonical_path->mnt = path->mnt;
