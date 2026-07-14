@@ -523,6 +523,7 @@ void fuse_args_to_req(struct fuse_req *req, struct fuse_args *args)
 	req->out.argvar = args->out_argvar;
 	req->out.numargs = args->out_numargs;
 	req->user_pages = args->user_pages;
+	req->canonical_path = args->canonical_path;
 	memcpy(req->out.args, args->out_args,
 	       args->out_numargs * sizeof(struct fuse_arg));
 

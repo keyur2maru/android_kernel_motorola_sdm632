@@ -308,6 +308,9 @@ struct fuse_args {
 	struct fuse_arg out_args[2];
 	struct file *out_passthrough_filp;
 	void (*end)(struct fuse_conn *fc, struct fuse_args *args, int error);
+
+	/** Path used for completing d_canonical_path */
+	struct path *canonical_path;
 };
 
 struct fuse_args_pages {
