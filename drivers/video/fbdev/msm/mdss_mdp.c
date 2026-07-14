@@ -299,17 +299,11 @@ u32 mdss_mdp_fb_stride(u32 fb_index, u32 xres, int bpp)
 	/* The adreno GPU hardware requires that the pitch be aligned to
 	 *  32 pixels for color buffers, so for the cases where the GPU
 	 *  is writing directly to fb0, the framebuffer pitch
-	 *  also needs to be 32 pixel aligned.
-	 *
-	 * channel A17: we render with Mesa/freedreno (Adreno 506, a5xx), whose
-	 * render-target pitch alignment is 64 pixels (256 bytes for RGBA8888), not
-	 * 32.  With 32px fb0 alignment, xres=720 -> line_length=2944 (736px) while
-	 * Mesa writes the client-target at 3072 (768px), so the fb scanout sheared
-	 * every line by 32px.  Align fb0 to 64px to match Mesa (720 -> 768).
+	 *  also needs to be 32 pixel aligned
 	 */
 
 	if (fb_index == 0)
-		return ALIGN(xres, 64) * bpp;
+		return ALIGN(xres, 32) * bpp;
 	else
 		return xres * bpp;
 }
@@ -2318,7 +2312,7 @@ static int mdss_mdp_get_pan_cfg(struct mdss_panel_cfg *pan_cfg)
 		pan_cfg->pan_intf = MDSS_PANEL_INTF_INVALID;
 		return -EINVAL;
 	} else if (mdss_mdp_panel[0] == '1') {
-		pan_cfg->lk_cfg = false; /* channel debug: force cont-splash OFF so fbcon owns the panel for on-screen logs */
+		pan_cfg->lk_cfg = true;
 	} else {
 		/* read from dt */
 		pan_cfg->lk_cfg = true;
